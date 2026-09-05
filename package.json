@@ -4,6 +4,11 @@
   "private": true,
   "description": "MigMaster WebSocket bridge for Cloudflare Workers + Durable Objects",
   "type": "module",
-  "scripts": { "dev": "wrangler dev", "deploy": "wrangler deploy" },
-  "devDependencies": { "wrangler": "^4.68.0" }
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy --config ./wrangler.json"
+  },
+  "devDependencies": {
+    "wrangler": "^4.68.0"
+  }
 }
