@@ -1,9 +1,8 @@
-<!DOCTYPE html>
-
+<!doctype html>
 <html lang="id">
 <head>
-<meta charset="utf-8"/>
-<meta content="width=device-width,initial-scale=1,viewport-fit=cover" name="viewport"/>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>MIGMASTER</title>
 <style>
 :root{--bg:#07101f;--panel:#101a2b;--panel2:#16243a;--border:#2d4362;--text:#f4f7fb;--muted:#a8b7cd;--green:#22c55e;--red:#ef4444;--blue:#3b82f6;--input:#050b16;--yellow:#f59e0b}
@@ -41,111 +40,126 @@ pre.log{height:220px;overflow:auto;background:#020617;border-radius:12px;padding
 <body>
 <header>
 <h1>MIGMASTER</h1>
+
 </header>
+
 <div class="wrap">
 <div class="card">
-<div class="section-title"><h2>Backend WebSocket</h2><span class="badge">Vercel + Backend</span></div>
-<div><label for="backendWsUrl">URL WebSocket backend</label><input autocomplete="off" id="backendWsUrl" placeholder="wss://nama-backend-anda.example/ws" spellcheck="false"/></div>
-<div class="grid2" style="margin-top:9px">
-<button class="blue" id="saveBackendUrl">Simpan URL</button>
-<button class="secondary" id="testBackendUrl">Tes Koneksi</button>
+ <div class="section-title"><h2>Backend WebSocket</h2><span class="badge">Vercel + Backend</span></div>
+ <div><label for="backendWsUrl">URL WebSocket backend</label><input id="backendWsUrl" placeholder="wss://nama-backend-anda.example/ws" autocomplete="off" spellcheck="false"></div>
+ <div class="grid2" style="margin-top:9px">
+  <button class="blue" id="saveBackendUrl">Simpan URL</button>
+  <button class="secondary" id="testBackendUrl">Tes Koneksi</button>
+ </div>
 </div>
-<div class="help" style="margin-top:9px">Frontend dapat di-host di Vercel. Backend Node.js harus berjalan di server yang mendukung WebSocket persisten. Masukkan URL <code>wss://.../ws</code> backend Anda.</div>
-</div>
+
 <div class="card quick-actions">
-<button class="primary" id="loginAll">Login</button>
-<button class="secondary" id="joinAll">Enter</button>
-<button class="secondary" id="leaveAll">Leave</button>
-<button class="secondary" id="balanceAll">Refresh Saldo</button>
-<button class="danger" id="disconnectAll">Logout</button>
+ <button class="primary" id="loginAll">Login</button>
+ <button class="secondary" id="joinAll">Enter</button>
+ <button class="secondary" id="leaveAll">Leave</button>
+ <button class="secondary" id="balanceAll">Refresh Saldo</button>
+ <button class="danger" id="disconnectAll">Logout</button>
 </div>
+
 <div class="card">
-<div class="section-title"><h2><span class="step">1</span>Siapkan 10 Akun</h2><span class="badge">10 Troop</span></div>
-<div class="grid2">
-<div><label>Username dasar</label><input autocomplete="off" id="baseUser" placeholder="Contoh: Troop" spellcheck="false"/></div>
-<div><label>Password untuk semua</label><input autocomplete="new-password" id="allPassword" placeholder="Password yang sama" type="password"/></div>
-</div>
-<div class="grid2">
-<div><label>Mulai nomor</label><input id="genFrom" inputmode="numeric" placeholder="Contoh: 3" type="number"/></div>
-<div><label>Sampai nomor</label><input id="genTo" inputmode="numeric" placeholder="Contoh: 12" type="number"/></div>
-</div>
-<div class="grid3">
-<button class="blue" id="genUsers">Generate Troop</button>
-<button class="blue" id="genPass">Generate Password</button>
-<button class="secondary" id="saveAccounts">Save Data</button>
-</div>
-<div class="grid2">
-<div><label>Nama Data</label><input autocomplete="off" id="dataName" placeholder="Contoh: akun1"/></div>
-<div><label>Data Save Tersimpan</label><select id="profileList" size="4"><option value="">Belum ada data</option></select></div>
-</div>
-<div class="grid2">
-<button class="secondary" id="loadAccounts">Load Data Terpilih</button>
-<button class="secondary" id="deleteProfile">Hapus Data Terpilih</button>
-</div>
-<div><label>Username Troop + Password (maks. 10)</label><textarea id="troopCredentials" placeholder="Troop3|password
+ <div class="section-title"><h2><span class="step">1</span>Siapkan 10 Akun</h2><span class="badge">10 Troop</span></div>
+ <div class="grid2">
+  <div><label>Username dasar</label><input id="baseUser" placeholder="Contoh: Troop" autocomplete="off" spellcheck="false"></div>
+  <div><label>Password untuk semua</label><input id="allPassword" type="password" placeholder="Password yang sama" autocomplete="new-password"></div>
+ </div>
+ <div style="height:9px"></div>
+ <div class="grid2">
+   <div><label>Mulai nomor</label><input id="genFrom" type="number" inputmode="numeric" placeholder="Contoh: 3"></div>
+   <div><label>Sampai nomor</label><input id="genTo" type="number" inputmode="numeric" placeholder="Contoh: 12"></div>
+ </div>
+ <div style="height:9px"></div>
+ <div class="grid3">
+  <button class="blue" id="genUsers">Generate Troop</button>
+  <button class="blue" id="genPass">Generate Password</button>
+  <button class="secondary" id="saveAccounts">Save Data</button>
+ </div>
+ <div style="height:9px"></div>
+ <div class="grid2">
+  <div><label>Nama Data</label><input id="dataName" placeholder="Contoh: akun1" autocomplete="off"></div>
+  <div><label>Data Save Tersimpan</label><select id="profileList" size="4"><option value="">Belum ada data</option></select></div>
+ </div>
+ <div style="height:9px"></div>
+ <div class="grid2">
+  <button class="secondary" id="loadAccounts">Load Data Terpilih</button>
+  <button class="secondary" id="deleteProfile">Hapus Data Terpilih</button>
+ </div>
+ <div style="height:9px"></div>
+  <div><label>Username Troop + Password (maks. 10)</label><textarea id="troopCredentials" rows="10" placeholder="Troop3|password
 Troop2|password
 ...
-Troop12|password" rows="10" spellcheck="false"></textarea></div>
-<div class="help" style="margin-top:9px">Format: satu Troop per baris <b>username|password</b>. Generate dan Save akan memperbarui data ini. Load mengembalikan seluruh username dan password.</div>
+Troop12|password" spellcheck="false"></textarea></div>
 </div>
+
 <div class="card">
-<div class="section-title"><h2><span class="step">2</span>Username &amp; Password</h2><span class="badge">1 tombol login</span></div>
+ <div class="section-title"><h2><span class="step">2</span>Username & Password</h2><span class="badge">1 tombol login</span></div>
+ <div class="accounts" id="accounts"></div>
 </div>
+
 <div class="card">
-<div class="section-title"><h2><span class="step">3</span>Masuk Room</h2><span class="badge">1 room</span></div>
-<div class="grid2">
-<div><label>Nama room</label><input autocomplete="off" id="room" spellcheck="false" value="MIG33"/></div>
-<div><label>Pesan room</label><input autocomplete="off" id="message" placeholder="Pesan..."/></div>
+ <div class="section-title"><h2><span class="step">3</span>Masuk Room</h2><span class="badge">1 room</span></div>
+ <div class="grid2">
+  <div><label>Nama room</label><input id="room" value="MIG33" autocomplete="off" spellcheck="false"></div>
+  <div><label>Pesan room</label><input id="message" placeholder="Pesan..." autocomplete="off"></div>
+ </div>
+ <div style="height:9px"></div>
+  <div class="grid2">
+   <button class="blue" id="messageAll">Kirim Pesan Semua Troop</button>
+  </div>
 </div>
-<div class="grid2">
-<button class="blue" id="messageAll">Kirim Pesan Semua Troop</button>
-</div>
-<div class="help" style="margin-top:9px"><b>Kirim Pesan Semua Troop:</b> mengirim satu pesan ke akun yang sudah Online dan terkonfirmasi masuk room.</div>
-</div>
+
 <div class="card">
-<div class="section-title"><h2><span class="step">4</span>Pilih Target</h2><span class="badge">maks. 10</span></div>
-<button class="blue" id="participants">List User Room</button>
-<div class="help" style="margin-top:9px"><b>Langkah:</b> tekan tombol di atas setelah akun masuk room, lalu centang username yang ingin dijadikan target. Maksimal 10.</div>
-<div class="list-head"><span>User di room</span><span id="userCount">0 user</span></div>
-<div class="user-list-view" id="userListView">
-<div class="empty-list">Belum ada user. Tekan List User Room.</div>
+ <div class="section-title"><h2><span class="step">4</span>Pilih Target</h2><span class="badge">maks. 10</span></div>
+ <button class="blue" id="participants">List User Room</button>
+ <div class="list-head"><span>User di room</span><span id="userCount">0 user</span></div>
+ <div id="userListView" class="user-list-view">
+   <div class="empty-list">Belum ada user. Tekan List User Room.</div>
+ </div>
+ <div class="selected-head"><span>Target kick</span><span id="targetCount">0/10</span></div>
+ <div id="targetSlots" class="target-slots"></div>
+ <div style="height:9px"></div>
+  <div class="grid2">
+   <div><label>Jumlah pengulangan (loop)</label><input id="kickLoops" type="number" min="1" max="100" value="1" inputmode="numeric"></div>
+   <div class="statusbox"><div class="small">Urutan kick</div><div class="balance">ID 1–10 per target</div></div>
+  </div>
+ <div class="grid2" style="margin-top:9px">
+ </div>
+ <div class="grid2" style="margin-top:9px">
+  <button class="secondary" id="clearTargets">Clear Target</button>
+    <button class="danger" id="kickAll">Kick All</button>
+ </div>
+ <div class="selected-head"><span>Antrian aksi</span><span id="queueProgress">0 item</span></div>
+ <div id="kickQueue" class="user-list-view" style="min-height:80px;max-height:220px"><div class="empty-list">Belum ada antrian.</div></div>
 </div>
-<div class="selected-head"><span>Target kick</span><span id="targetCount">0/10</span></div>
-<div class="grid2">
-<div><label>Jumlah pengulangan (loop)</label><input id="kickLoops" inputmode="numeric" max="100" min="1" type="number" value="1"/></div>
-<div class="statusbox"><div class="small">Urutan kick</div><div class="balance">ID 1–10 per target</div></div>
-</div>
-<div class="help" style="margin-top:9px"><b>Kick All:</b> untuk setiap target, ID 1–10 mengirim <code>room.kick</code> secara berurutan. Setiap target diproses sesuai urutan target yang dipilih. API mig33 memproses kick sebagai vote-kick dan mengembalikan <code>job_id</code>; hasil job dipoll di Log Sistem.</div>
-<div class="grid2" style="margin-top:9px">
-<button class="secondary" id="clearTargets">Clear Target</button>
-<button class="danger" id="kickAll">Kick All</button>
-</div>
-<div class="selected-head"><span>Antrian aksi</span><span id="queueProgress">0 item</span></div>
-<div class="user-list-view" id="kickQueue" style="min-height:80px;max-height:220px"><div class="empty-list">Belum ada antrian.</div></div>
-<div class="help" style="margin-top:9px"></div>
-</div>
+
+ <div class="card">
+  <div class="section-title"><h2><span class="step">5</span>Auto Detect Vote-Kick</h2><span class="badge">APK logic</span></div>
+  <div class="grid2">
+   <div><label for="autoKickThresholdMs">Eksekusi auto kick saat sisa timer (ms)</label><input id="autoKickThresholdMs" type="number" min="0" max="60000" value="30000" inputmode="numeric"></div>
+    <div><label>Countdown maksimal (ms)</label><div class="statusbox"><div class="balance">60000 ms</div><div class="small">Dimulai saat ID mendeteksi kick</div></div></div>
+  </div>
+  <div id="autoKickTimer" class="timer waiting"><span>Menunggu deteksi kick di room</span><strong>60000 ms</strong></div>
+  <div style="margin-top:9px">
+   <label class="check-row"><input id="autoKickEnabled" type="checkbox" checked> Aktifkan auto kick saat terdeteksi</label>
+   <div class="grid3" style="margin-top:9px">
+    <button class="primary" id="startAutoKickTimer">Start Timer</button>
+    <button class="secondary" id="stopAutoKickTimer">Stop Timer</button>
+    <button class="secondary" id="resetAutoKickTimer">Reset Timer</button>
+   </div>
+  </div>
+ </div>
+
 <div class="card">
-<div class="section-title"><h2><span class="step">5</span>Auto Detect Vote-Kick</h2><span class="badge">APK logic</span></div>
-<div class="grid2">
-<div><label for="autoKickThresholdMs">Eksekusi auto kick saat sisa timer (ms)</label><input id="autoKickThresholdMs" inputmode="numeric" max="60000" min="0" type="number" value="30000"/></div>
-<div><label>Countdown maksimal (ms)</label><div class="statusbox"><div class="balance">60000 ms</div><div class="small">Dimulai saat ID mendeteksi kick</div></div></div>
-</div>
-<div class="timer waiting" id="autoKickTimer"><span>Menunggu deteksi kick di room</span><strong>60000 ms</strong></div>
-<div style="margin-top:9px">
-<label class="check-row"><input checked="" id="autoKickEnabled" type="checkbox"/> Aktifkan auto kick saat terdeteksi</label>
-<div class="grid3" style="margin-top:9px">
-<button class="primary" id="startAutoKickTimer">Start Timer</button>
-<button class="secondary" id="stopAutoKickTimer">Stop Timer</button>
-<button class="secondary" id="resetAutoKickTimer">Reset Timer</button>
+
+   <div class="section-title"><h2>Log Sistem</h2><button class="secondary" style="width:auto;min-height:40px" id="clearLog">Clear</button></div>
+ <pre class="log" id="log"></pre><pre id="participantsLog" class="hidden"></pre>
 </div>
 </div>
-<div class="help" style="margin-top:9px"><b>Aturan APK:</b> setelah join, backend membaca event <code>room.text</code> dari WebSocket dan hanya mencocokkan pesan dengan sender <code>room</code> yang berisi <code>A vote to kick</code>. Timer dapat dimulai otomatis saat deteksi atau manual dengan <b>Start Timer</b>. Timer berjalan dari 60000 ms, dapat dihentikan dengan <b>Stop Timer</b>, lalu Kick All otomatis dijalankan saat sisa timer mencapai ambang. ACK <code>room.kick.queued</code> dari queue sendiri tidak dianggap sebagai deteksi.</div>
-</div>
-<div class="card">
-<div class="section-title"><h2>Log Sistem</h2><button class="secondary" id="clearLog" style="width:auto;min-height:40px">Clear</button></div>
-<pre class="log" id="log"></pre><pre class="hidden" id="participantsLog"></pre>
-</div>
-</div>
+
 <script>
 const $=id=>document.getElementById(id);
 const accounts=Array.from({length:10},()=>({username:"",password:"",status:"offline",balance:"-"}));
@@ -155,6 +169,7 @@ let participantUsers=[];
 let queueItems=[];
 let queueIndex=0;
 let autoKickRemainingMs=null;
+let targetDelayByName=new Map();
 
 function formatMs(value){
  const ms=Math.max(0,Math.floor(Number(value)||0));
@@ -192,6 +207,7 @@ function renderAutoKickState(state){
 function syncAutoKickConfig(){
  if(!backendConnected)return;
  const thresholdMs=Math.max(0,Math.min(60000,Number($('autoKickThresholdMs').value)||0));
+ const=Math.max(0,Math.min(60000,Number($('').value)||0));
  const loopCount=Math.max(1,Math.min(100,Number($('kickLoops').value)||1));
  send({
    action:'autoKick.configure',
@@ -199,7 +215,6 @@ function syncAutoKickConfig(){
    room:$('room').value.trim(),
    thresholdMs,
    targets:selectedTargets(),
-   
    loopCount
  });
 }
@@ -208,6 +223,7 @@ function renderQueue(){
  const box=$('kickQueue');
  const loops=Math.max(1,Math.min(100,Number($('kickLoops').value)||1));
  const targets=selectedTargets();
+  const delays=targetDelaysMs();
  queueItems=[];
  for(let l=1;l<=loops;l++){
    targets.forEach((target,i)=>{
@@ -235,7 +251,7 @@ function renderQueue(){
        <span class="user-name">Loop ${x.loop} · Target ${x.position}: ${escapeHtml(x.target)}</span>
      </div>
      <div style="margin:5px 0 0 36px;font-size:12px;color:var(--muted)">
-       ID 1–10 → target ini
+       ID 1–10 → target ini · delay ${x.delayMs} ms → target berikutnya
      </div>
    </div>`).join('');
  $('queueProgress').textContent=`${queueItems.length} target-step · ${totalActions} executor-actions`;
@@ -489,7 +505,7 @@ function connectDashboard(){
   if(d.type==="kickQueue.start"){
     $('queueProgress').textContent=`0/${d.total} aksi`;
      $('kickAll').disabled=true;
-      log(`${d.source==="autoKick"?"Auto Kick":"Kick All"} dimulai: ID 1–10 per target · ${d.targets.length} target × ${d.loopCount} loop · wave.`);
+      log(`${d.source==="autoKick"?"Auto Kick":"Kick All"} dimulai: ID 1–10 per target · ${d.targets.length} target × ${d.loopCount} loop · delay [${(d.targetDelaysMs||[]).join(", ")}] ms · ${d.sequentialMode?"sequential":"parallel"} wave.`);
     return;
   }
    if(d.type==="kickQueue.step"){
@@ -594,7 +610,7 @@ function updateTargetSlots(){
  $("targetCount").textContent=targets.length+"/10";
  const slots=$("targetSlots");slots.innerHTML="";
  if(!targets.length){
-   slots.innerHTML='<div class="help">Belum ada target. Pilih username dari List User Room.</div>';
+   slots.innerHTML='';
     syncAutoKickConfig();
    return;
  }
@@ -602,14 +618,27 @@ function updateTargetSlots(){
    const row=document.createElement("div");row.className="target-row";
    const num=document.createElement("div");num.className="target-number";num.textContent=String(i+1);
    const name=document.createElement("div");name.className="statusbox";name.textContent=u;
-    row.append(num,name);slots.appendChild(row);
+    const delay=document.createElement("input");
+    delay.type="number";
+    delay.min="0";
+    delay.max="60000";
+    delay.step="1";
+    delay.inputMode="numeric";
+    delay.value=String(targetDelayByName.get(u)??500);
+    delay.title=`Delay setelah target ${i+1} dalam ms`;
+    delay.setAttribute("aria-label",`Delay target ${i+1} dalam ms`);
+    delay.addEventListener("input",()=>{
+      targetDelayByName.set(u,Math.max(0,Math.min(60000,Number(delay.value)||0)));
+      renderQueue();
+      syncAutoKickConfig();
+    });
+    row.append(num,name,delay);slots.appendChild(row);
  });
  renderQueue();
   syncAutoKickConfig();
 }
 
 function selectedTargets(){return [...selectedTargetSet].slice(0,10)}
-}
 function clearTargets(){
  selectedTargetSet.clear();
  document.querySelectorAll("#userListView input[type=checkbox]").forEach(cb=>{
@@ -620,18 +649,22 @@ function clearTargets(){
 async function runKickQueue(){
  const room=$('room').value.trim();
  const targets=selectedTargets();
+ const targetDelays=targetDelaysMs();
+ const=Math.max(0,Math.min(60000,Number($('').value)||0));
  const loopCount=Math.max(1,Math.min(100,Number($('kickLoops').value)||1));
+ 
  if(!room||!targets.length)return alert('Room dan minimal 1 target wajib diisi.');
  if(!backendConnected)return alert('Dashboard server belum terhubung.');
   syncAutoKickConfig();
  $('kickAll').disabled=true;
   $('kickAll').textContent='Menjalankan Kick All...';
  queueIndex=0;
+   if(!send({action:'kickQueue',room,targets,targetDelaysMs:targetDelays,loopCount,sequentialMode})){
     $('kickAll').disabled=false;
      $('kickAll').textContent='Kick All';
     return;
   }
-    log(`Kick All dimulai: ID 1–10 per target, ${targets.length} target × ${loopCount} loop · wave.`);
+    log(`Kick All dimulai: ID 1–10 per target, ${targets.length} target × ${loopCount} loop · delay per target · ${sequentialMode?"sequential":"parallel"} wave.`);
 }
 
 $('genUsers').onclick=generateUsers;
@@ -661,6 +694,8 @@ $('messageAll').onclick=()=>{
 $('participants').onclick=()=>{ const room=$('room').value.trim(); if(!room)return alert('Nama room wajib diisi'); participantUsers=[]; renderUserList([]); log('Meminta List User Room: '+room); send({action:'participants',room}); };
 $('clearTargets').onclick=clearTargets;
 $('kickLoops').oninput=renderQueue;
+$('').oninput=syncAutoKickConfig;
+$('sequentialMode').onchange=syncAutoKickConfig;
 $('kickAll').onclick=runKickQueue;
 $('room').oninput=syncAutoKickConfig;
 $('autoKickThresholdMs').oninput=syncAutoKickConfig;
