@@ -3,17 +3,29 @@
   "name": "migmaster-cloudflare-backend",
   "main": "index.js",
   "compatibility_date": "2026-09-05",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
   "vars": {
     "MIG_WS_URL": "wss://developer.mig33.id/developer/ws"
   },
   "durable_objects": {
     "bindings": [
-      { "name": "MIGMASTER_SESSIONS", "class_name": "MigMasterSession" }
+      {
+        "name": "MIGMASTER_SESSIONS",
+        "class_name": "MigMasterSession"
+      }
     ]
   },
   "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["MigMasterSession"] }
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "MigMasterSession"
+      ]
+    }
   ],
-  "observability": { "enabled": true }
+  "observability": {
+    "enabled": true
+  }
 }
