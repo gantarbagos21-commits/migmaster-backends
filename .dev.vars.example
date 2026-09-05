@@ -1,0 +1,2 @@
+# Optional dashboard protection. Leave empty if you do not want a token.
+DASHBOARD_TOKEN=
