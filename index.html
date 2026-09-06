@@ -511,7 +511,10 @@ function connectDashboard(){
    const i=Number(d.index);
    if(Number.isInteger(i) && accounts[i]){
     accounts[i].status="online";
-    accounts[i].balance=accounts[i].balance||"-";
+    const wallet=d.data.data?.wallet||d.data.data?.developer?.wallet||null;
+    const initialBalance=wallet?.label||(wallet?.balance_cr!=null?String(wallet.balance_cr)+" CR":null);
+    if(initialBalance) accounts[i].balance=initialBalance;
+    else accounts[i].balance=accounts[i].balance||"-";
     setStatus(i,"Online","online");
     render();
    }
