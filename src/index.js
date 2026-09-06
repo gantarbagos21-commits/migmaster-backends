@@ -1,108 +1,81 @@
-import { DurableObject } from "cloudflare:workers";
+import http from "node:http";
+import { WebSocketServer, WebSocket } from "ws";
 
 const DEFAULT_MIG_WS_URL = "wss://developer.mig33.id/developer/ws";
-let MIG_WS_URL = DEFAULT_MIG_WS_URL;
-let DASHBOARD_TOKEN = "";
+const MIG_WS_URL = process.env.MIG_WS_URL || DEFAULT_MIG_WS_URL;
+const DASHBOARD_TOKEN = process.env.DASHBOARD_TOKEN || "";
+const PORT = Number(process.env.PORT || 3000);
 
-// Small compatibility layer so the proven V5 backend logic can run on the
-// Cloudflare Workers WebSocket API without the Node `ws` package.
-class CFWebSocket {
-  static CONNECTING = 0;
-  static OPEN = 1;
-  static CLOSING = 2;
-  static CLOSED = 3;
-
-  constructor(urlOrSocket) {
-    this._handlers = new Map();
-    this._onceHandlers = new Map();
-    this._socket = urlOrSocket;
-    this._bind();
-  }
-
-  static async connect(url) {
-    // Cloudflare Workers officially supports outbound WebSocket connections
-    // through fetch() + Upgrade: websocket. Prefer this handshake so upstream
-    // HTTP status codes (for example 523) are visible to the backend instead
-    // of being reduced to a generic WebSocket error event.
-    const response = await fetch(url, {
-      headers: { Upgrade: "websocket" }
+// Native Node.js WebSocket connection to Mig33. This is intentionally direct:
+// the persistent Node.js host connects to developer.mig33.id without the
+// Cloudflare Workers outbound-WebSocket layer that produced the HTTP 523/fetch
+// failure in the previous backend.
+const CFWebSocket = {
+  connect(url) {
+    return new Promise((resolve, reject) => {
+      const ws = new WebSocket(url);
+      let settled = false;
+      const fail = (err) => {
+        if (settled) return;
+        settled = true;
+        try { ws.close(); } catch {}
+        reject(err instanceof Error ? err : new Error(String(err)));
+      };
+      ws.once("open", () => {
+        if (settled) return;
+        settled = true;
+        resolve(ws);
+      });
+      ws.once("error", fail);
     });
-
-    if (response.status !== 101 || !response.webSocket) {
-      let body = "";
-      try { body = await response.text(); } catch {}
-      const detail = body.trim().replace(/\s+/g, " ").slice(0, 300);
-      throw new Error(
-        `Upstream WebSocket handshake gagal: HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ""}${detail ? ` - ${detail}` : ""}`
-      );
-    }
-
-    response.webSocket.accept();
-    return new CFWebSocket(response.webSocket);
-  }
-
-  get readyState() { return this._socket.readyState; }
-
-  _emit(name, event) {
-    const set = this._handlers.get(name);
-    if (set) for (const fn of [...set]) { try { fn(...event); } catch {} }
-    const once = this._onceHandlers.get(name);
-    if (once) {
-      this._onceHandlers.delete(name);
-      try { once(...event); } catch {}
-    }
-  }
-
-  _bind() {
-    this._socket.addEventListener("open", event => this._emit("open", [event]));
-    this._socket.addEventListener("message", async event => {
-      let data = event.data;
-      if (data instanceof ArrayBuffer) data = new TextDecoder().decode(data);
-      else if (typeof Blob !== "undefined" && data instanceof Blob) data = await data.text();
-      this._emit("message", [data]);
-    });
-    this._socket.addEventListener("error", event => this._emit("error", [event]));
-    this._socket.addEventListener("close", event => {
-      this._emit("close", [event.code, event.reason || ""]);
-    });
-  }
-
-  on(name, fn) {
-    if (!this._handlers.has(name)) this._handlers.set(name, new Set());
-    this._handlers.get(name).add(fn);
-    return this;
-  }
-
-  once(name, fn) {
-    this._onceHandlers.set(name, fn);
-    return this;
-  }
-
-  send(data) { return this._socket.send(data); }
-  close(code = 1000, reason = "") { try { this._socket.close(code, reason); } catch {} }
-  terminate() { try { this._socket.close(1000, "terminated"); } catch {} }
-  ping() { /* Browser/Workers WebSocket has no exposed protocol ping API. */ }
-}
-
-const WebSocket = CFWebSocket;
-
-const wss = {
-  _connectionHandler: null,
-  on(event, handler) {
-    if (event === "connection") this._connectionHandler = handler;
-    return this;
-  },
-  emitConnection(socket) {
-    if (this._connectionHandler) this._connectionHandler(socket);
   }
 };
 
-function jsonResponse(obj, status = 200) {
-  return new Response(JSON.stringify(obj), {
-    status,
-    headers: { "content-type": "application/json; charset=utf-8" }
-  });
+const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false });
+
+const httpServer = http.createServer((req, res) => {
+  const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+  if (url.pathname === "/" || url.pathname === "/health") {
+    res.writeHead(200, {"content-type":"application/json; charset=utf-8"});
+    return res.end(JSON.stringify({
+      ok: true,
+      service: "migmaster-node-persistent",
+      websocket: "/ws",
+      mig33Endpoint: MIG_WS_URL,
+      backendVersion: "migmaster-node-final-v3-anti-stall-vote-joinfixed-2026-09-07"
+    }));
+  }
+  res.writeHead(404, {"content-type":"text/plain; charset=utf-8"});
+  res.end("Not found");
+});
+
+function acceptDashboardSocket(socket, req) {
+  const url = new URL(req.url || "/ws", `http://${req.headers.host || "localhost"}`);
+  if (url.pathname !== "/ws") {
+    try { socket.close(1008, "invalid path"); } catch {}
+    return;
+  }
+  if (DASHBOARD_TOKEN && url.searchParams.get("token") !== DASHBOARD_TOKEN) {
+    try { socket.close(1008, "unauthorized"); } catch {}
+    return;
+  }
+  wss.emit("connection", socket, req);
 }
+
+httpServer.on("upgrade", (req, socket, head) => {
+  const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+  if (url.pathname !== "/ws") {
+    socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
+    socket.destroy();
+    return;
+  }
+  if (DASHBOARD_TOKEN && url.searchParams.get("token") !== DASHBOARD_TOKEN) {
+    socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
+    socket.destroy();
+    return;
+  }
+  wss.handleUpgrade(req, socket, head, ws => acceptDashboardSocket(ws, req));
+});
 
 function normalizeUsers(value) {
   const out = [];
@@ -397,7 +370,7 @@ let activeKickRun = null;
 wss.on("connection", dashboard => {
   dashboardClient = dashboard;
 
-  safeSend(dashboardClient, {type: "dashboard.ready", accounts: 10, backendVersion: "migmaster-cloudflare-final-v2-anti-stall-vote-joinfixed-523wsfix-2026-09-07"});
+  safeSend(dashboardClient, {type: "dashboard.ready", accounts: 10, backendVersion: "migmaster-node-final-v3-anti-stall-vote-joinfixed-2026-09-07"});
 
   function dashboardStatus(i, status, extra = {}) {
     safeSend(dashboardClient, {type: "status", index: i, status, ...extra});
@@ -1821,67 +1794,25 @@ wss.on("connection", dashboard => {
 });
 
 
-export class MigMasterSession extends DurableObject {
-  constructor(ctx, env) {
-    super(ctx, env);
-    this.env = env;
+
+httpServer.listen(PORT, "0.0.0.0", () => {
+  console.log(`MigMaster persistent Node.js backend listening on 0.0.0.0:${PORT}`);
+  console.log(`Dashboard WebSocket: /ws`);
+  console.log(`Upstream Mig33 WebSocket: ${MIG_WS_URL}`);
+});
+
+function shutdown(signal) {
+  console.log(`${signal} received; shutting down`);
+  for (const client of wss.clients) {
+    try { client.close(1001, "server shutdown"); } catch {}
   }
-
-  async fetch(request) {
-    const url = new URL(request.url);
-    if (url.pathname !== "/ws") {
-      return jsonResponse({
-        ok: true,
-        service: "migmaster-backend",
-        websocket: "/ws",
-        mig33Endpoint: MIG_WS_URL,
-        backendVersion: "migmaster-cloudflare-final-v2-anti-stall-vote-joinfixed-523wsfix-2026-09-07"
-      });
-    }
-
-    if (request.headers.get("Upgrade") !== "websocket") {
-      return new Response("Expected WebSocket", { status: 426 });
-    }
-
-    DASHBOARD_TOKEN = this.env?.DASHBOARD_TOKEN || "";
-    MIG_WS_URL = this.env?.MIG_WS_URL || DEFAULT_MIG_WS_URL;
-    if (DASHBOARD_TOKEN && url.searchParams.get("token") !== DASHBOARD_TOKEN) {
-      return new Response("Unauthorized", { status: 401 });
-    }
-
-    const pair = new WebSocketPair();
-    const client = pair[0];
-    const server = pair[1];
-    server.accept();
-    const dashboard = new CFWebSocket(server);
-    wss.emitConnection(dashboard);
-    return new Response(null, { status: 101, webSocket: client });
+  for (let i = 0; i < accounts.length; i++) {
+    try { closeAccount(i, true); } catch {}
   }
+  httpServer.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 8000).unref();
 }
 
-export default {
-  async fetch(request, env) {
-    const url = new URL(request.url);
-    if (url.pathname === "/health") {
-      return jsonResponse({
-        ok: true,
-        service: "migmaster-backend",
-        websocket: "/ws",
-        mig33Endpoint: env?.MIG_WS_URL || DEFAULT_MIG_WS_URL,
-        backendVersion: "migmaster-cloudflare-final-v2-anti-stall-vote-joinfixed-523wsfix-2026-09-07"
-      });
-    }
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
 
-    if (url.pathname !== "/ws") {
-      return jsonResponse({
-        ok: true,
-        service: "migmaster-backend",
-        websocket: "/ws",
-        backendVersion: "migmaster-cloudflare-final-v2-anti-stall-vote-joinfixed-523wsfix-2026-09-07"
-      });
-    }
-
-    const id = env.MIGMASTER_SESSION.idFromName("migmaster-main");
-    return env.MIGMASTER_SESSION.get(id).fetch(request);
-  }
-};
