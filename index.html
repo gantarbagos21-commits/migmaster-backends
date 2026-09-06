@@ -763,7 +763,7 @@ async function runKickQueue(){
     renderKickProgress();
     return;
   }
-    log(`Kick All dimulai: ${targets.length} target × ${loopCount} loop. Backend akan memakai hanya ID yang terkonfirmasi masuk room.`);
+    log(`Kick All dimulai: ${targets.length} target × ${loopCount} loop. Backend memproses target satu per satu dan menunggu job vote-kick selesai sebelum lanjut target berikutnya.`);
 }
 
 $('genUsers').onclick=generateUsers;
