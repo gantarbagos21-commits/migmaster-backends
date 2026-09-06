@@ -15,10 +15,30 @@ class CFWebSocket {
   constructor(urlOrSocket) {
     this._handlers = new Map();
     this._onceHandlers = new Map();
-    this._socket = typeof urlOrSocket === "string"
-      ? new globalThis.WebSocket(urlOrSocket)
-      : urlOrSocket;
+    this._socket = urlOrSocket;
     this._bind();
+  }
+
+  static async connect(url) {
+    // Cloudflare Workers officially supports outbound WebSocket connections
+    // through fetch() + Upgrade: websocket. Prefer this handshake so upstream
+    // HTTP status codes (for example 523) are visible to the backend instead
+    // of being reduced to a generic WebSocket error event.
+    const response = await fetch(url, {
+      headers: { Upgrade: "websocket" }
+    });
+
+    if (response.status !== 101 || !response.webSocket) {
+      let body = "";
+      try { body = await response.text(); } catch {}
+      const detail = body.trim().replace(/\s+/g, " ").slice(0, 300);
+      throw new Error(
+        `Upstream WebSocket handshake gagal: HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ""}${detail ? ` - ${detail}` : ""}`
+      );
+    }
+
+    response.webSocket.accept();
+    return new CFWebSocket(response.webSocket);
   }
 
   get readyState() { return this._socket.readyState; }
@@ -352,7 +372,6 @@ function accountState() {
 
 let dashboardClient = null;
 const accounts = Array.from({length: 10}, accountState);
-let commandQueueRunning = false;
 const autoKick = {
   enabled: false,
   room: "",
@@ -369,10 +388,16 @@ const autoKick = {
   countdownTriggered: false
 };
 
+// Only one kick dispatch run may own the 10x10 sender at a time. This prevents
+// double-clicks/manual+auto overlap from interleaving votes and making the
+// upstream queue appear stuck. The guard is cleared when dispatch finishes;
+// it never waits for room.kick.result or job.get.
+let activeKickRun = null;
+
 wss.on("connection", dashboard => {
   dashboardClient = dashboard;
 
-  safeSend(dashboardClient, {type: "dashboard.ready", accounts: 10, backendVersion: "persistent-account-sockets-kickall-v5-cloudflare-2026-09-07-kickresult-joinfixed-ackorder"});
+  safeSend(dashboardClient, {type: "dashboard.ready", accounts: 10, backendVersion: "migmaster-cloudflare-final-v2-anti-stall-vote-joinfixed-523wsfix-2026-09-07"});
 
   function dashboardStatus(i, status, extra = {}) {
     safeSend(dashboardClient, {type: "status", index: i, status, ...extra});
@@ -503,12 +528,6 @@ wss.on("connection", dashboard => {
             index: 0,
             message: "Timer selesai, tetapi belum ada target kick yang dipilih."
           });
-        } else if (commandQueueRunning) {
-          safeSend(dashboardClient, {
-            type: "error",
-            index: 0,
-            message: "Auto Kick tidak dijalankan karena antrian perintah masih berjalan."
-          });
         } else {
           autoKickState("triggering", {remainingMs});
           runKickQueue(
@@ -520,7 +539,10 @@ wss.on("connection", dashboard => {
             {
               socketDelayMs: autoKick.socketDelayMs,
               sequentialMode: autoKick.sequentialMode,
-              loopDelayMs: autoKick.delayMs
+              loopDelayMs: autoKick.delayMs,
+              delayMs: autoKick.delayMs,
+              voteDelayMs: autoKick.delayMs,
+              targetDelaysMs: autoKick.targetDelaysMs
             }
           ).finally(() => {
             if (autoKick.countdownEndAt) {
@@ -855,7 +877,7 @@ wss.on("connection", dashboard => {
     });
   }
 
-  function connectAccount(i, options = {}) {
+  async function connectAccount(i, options = {}) {
     const a = accounts[i];
     stopPing(i);
     stopJobPolling(i);
@@ -875,7 +897,26 @@ wss.on("connection", dashboard => {
 
     dashboardStatus(i, "connecting");
 
-    const ws = new WebSocket(MIG_WS_URL);
+    let ws;
+    try {
+      ws = await CFWebSocket.connect(MIG_WS_URL);
+    } catch (err) {
+      const message = publicError(err?.message || err);
+      a.ready = false;
+      a.ws = null;
+      auditRoom(i, "SOCKET", "connect_error", "", {message});
+      dashboardStatus(i, "error", {
+        message,
+        upstream: MIG_WS_URL
+      });
+      safeSend(dashboardClient, {
+        type: "log",
+        index: i,
+        message: `WebSocket UPSTREAM ERROR: ${message}`
+      });
+      return;
+    }
+
     a.ws = ws;
     ws.on("pong", () => {
       a.lastHeartbeatAt = Date.now();
@@ -1191,21 +1232,31 @@ wss.on("connection", dashboard => {
       return false;
     }
     if (!canSendToAccount(i, payload)) return false;
+
+    // Metadata is best-effort only. It is NOT a dispatch queue and is never
+    // awaited. Keep it bounded so a silent upstream cannot make memory grow
+    // forever when many votes are sent without queued/result responses.
     a.pendingKickDispatches.push({
       room: String(payload?.room || ""),
       target: String(payload?.target_username || ""),
       runId: String(meta.runId || ""),
       loop: Number(meta.loop || 0),
       targetIndex: Number(meta.targetIndex || 0),
-      actionNo: Number(meta.actionNo || 0)
+      actionNo: Number(meta.actionNo || 0),
+      sentAt: Date.now()
     });
+    if (a.pendingKickDispatches.length > 2000) {
+      a.pendingKickDispatches.splice(0, a.pendingKickDispatches.length - 2000);
+    }
+
     try {
-      // room.kick is a documented queued API command. We send the exact
-      // protocol payload and use job_id/job.get for authoritative completion.
+      // room.kick remains the exact documented protocol payload. The sender
+      // returns immediately after socket.send(); no result/job is required
+      // before the next vote is dispatched.
       a.ws.send(JSON.stringify(payload));
       auditRoom(i, "OUT", "room.kick", payload.room, {
         target: payload.target_username,
-        source: "kickQueue",
+        source: "kickDispatchNoWait",
         runId: meta.runId || "",
         actionNo: meta.actionNo || 0
       });
@@ -1216,35 +1267,61 @@ wss.on("connection", dashboard => {
     }
   }
 
-  async function runKickQueue(room, targets, delayMs, loopCount, source = "kickAll") {
+  async function runKickQueue(room, targets, delayMs, loopCount, source = "kickAll", options = {}) {
     if (!room || !targets.length) return {started: false, sent: 0, skipped: 0, total: 0};
 
-    const loopDelayMs = clampDelayMs(delayMs);
+    // Compatibility with the existing frontend: delayMs, voteDelayMs,
+    // socketDelayMs and loopDelayMs all mean the frontend-controlled spacing
+    // between outbound votes. targetDelaysMs remains accepted for clients
+    // that already send per-target timing.
+    const resolvedDelayMs = clampDelayMs(
+      options.loopDelayMs ?? options.voteDelayMs ?? options.socketDelayMs ?? delayMs ?? 0
+    );
+    const loopCountSafe = Math.max(1, Math.min(100, Number(loopCount) || 1));
     const kickQueueId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const uniqueTargets = [...new Set(targets.map(v => String(v || "").trim()).filter(Boolean))].slice(0, 10);
+
+    if (activeKickRun) {
+      safeSend(dashboardClient, {
+        type: "kickQueue.error",
+        room,
+        source,
+        total: 0,
+        done: 0,
+        sent: 0,
+        skipped: 0,
+        message: `Kick run ${activeKickRun} masih aktif; run baru ditolak agar vote tidak saling menimpa.`
+      });
+      return {started: false, sent: 0, skipped: 0, total: 0, busy: true};
+    }
+
+    activeKickRun = kickQueueId;
+
     const preflight = uniqueTargets.map(target => ({
       target,
       eligible: accounts.map((a, index) => ({a, index}))
         .filter(({a}) => a.ready && a.ws?.readyState === WebSocket.OPEN && hasJoinedRoom(a, room) && (!a.permissions.length || a.permissions.includes("rooms.kick")))
         .map(({index}) => index + 1)
     }));
-    const voterCount = [...new Set(preflight.flatMap(item => item.eligible))].length;
-    const total = uniqueTargets.length * voterCount * loopCount;
+    const voterIds = [...new Set(preflight.flatMap(item => item.eligible))];
+    const voterCount = voterIds.length;
+    const total = uniqueTargets.length * voterCount * loopCountSafe;
 
     safeSend(dashboardClient, {
       type: "kickQueue.preflight",
       room,
       targets: uniqueTargets,
-      voters: [...new Set(preflight.flatMap(item => item.eligible))],
+      voters: voterIds,
       detail: preflight,
       total,
-      loopCount,
+      loopCount: loopCountSafe,
       source,
       kickQueueId,
-      mode: "direct-dispatch-no-result-queue"
+      mode: "anti-stall-direct-dispatch-v2"
     });
 
     if (!voterCount) {
+      activeKickRun = null;
       safeSend(dashboardClient, {
         type: "kickQueue.error",
         total: 0,
@@ -1257,32 +1334,28 @@ wss.on("connection", dashboard => {
       return {started: false, sent: 0, skipped: uniqueTargets.length, total: 0};
     }
 
-    accounts.forEach(a => {
-      a.completedKickActions.clear();
-      a.acknowledgedKickActions.clear();
-    });
-
     let actionNo = 0;
     let sent = 0;
     let skipped = 0;
-    let completed = 0;
     const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
     safeSend(dashboardClient, {
       type: "kickQueue.start",
       room,
       targets: uniqueTargets,
-      loopDelayMs,
-      loopCount,
+      delayMs: resolvedDelayMs,
+      voteDelayMs: resolvedDelayMs,
+      loopDelayMs: resolvedDelayMs,
+      loopCount: loopCountSafe,
       total,
       source,
       kickQueueId,
-      mode: "direct-dispatch-no-result-queue",
-      note: "Tidak menunggu room.kick.result atau job.get untuk mengirim vote berikutnya. Delay dikendalikan dari frontend."
+      mode: "anti-stall-direct-dispatch-v2",
+      note: "Tidak menunggu room.kick.result, room.kick.queued, atau job.get sebelum vote berikutnya. Delay hanya mengatur jarak pengiriman."
     });
 
     try {
-      for (let loop = 1; loop <= loopCount; loop++) {
+      for (let loop = 1; loop <= loopCountSafe; loop++) {
         for (let targetIndex = 0; targetIndex < uniqueTargets.length; targetIndex++) {
           const target = uniqueTargets[targetIndex];
           const eligible = accounts.map((a, index) => ({a, index}))
@@ -1297,7 +1370,7 @@ wss.on("connection", dashboard => {
             target,
             eligibleAccounts: eligible.map(index => index + 1),
             eligibleCount: eligible.length,
-            mode: "direct-dispatch-no-result-queue"
+            mode: "anti-stall-direct-dispatch-v2"
           });
 
           for (const accountIndex of eligible) {
@@ -1319,7 +1392,7 @@ wss.on("connection", dashboard => {
               safeSend(dashboardClient, {
                 type: "log",
                 index: accountIndex,
-                message: `KICK dikirim langsung: target=${target}; voter #${accountIndex + 1}; action=${currentAction}`
+                message: `KICK direct-send: target=${target}; voter #${accountIndex + 1}; action=${currentAction}`
               });
             } else {
               skipped++;
@@ -1327,6 +1400,7 @@ wss.on("connection", dashboard => {
 
             safeSend(dashboardClient, {
               type: "kickQueue.step",
+              runId: kickQueueId,
               loop,
               targetIndex: targetIndex + 1,
               target,
@@ -1335,20 +1409,22 @@ wss.on("connection", dashboard => {
               total,
               sent,
               skipped,
+              done: currentAction,
               status: didSend ? "sent" : "skipped",
-              mode: "direct-dispatch-no-result-queue"
+              mode: "anti-stall-direct-dispatch-v2"
             });
 
-            // This is only a send-rate delay. We do NOT wait for room.kick.result
-            // or job.get before dispatching the next vote.
-            if (didSend && loopDelayMs > 0) await sleep(loopDelayMs);
+            // ANTI-MACET CORE: this is the only optional wait. It is a local
+            // send-rate delay controlled by the frontend. Never inspect or
+            // await room.kick.result / .queued / job.get here.
+            if (didSend && resolvedDelayMs > 0) await sleep(resolvedDelayMs);
           }
 
-          completed = sent;
           safeSend(dashboardClient, {
             type: "kickQueue.progress",
+            runId: kickQueueId,
             done: Math.min(total, actionNo),
-            completed,
+            completed: sent,
             total,
             sent,
             skipped,
@@ -1356,26 +1432,38 @@ wss.on("connection", dashboard => {
             targetIndex: targetIndex + 1,
             target,
             source,
-            mode: "direct-dispatch-no-result-queue"
+            mode: "anti-stall-direct-dispatch-v2"
           });
         }
       }
     } catch (err) {
-      safeSend(dashboardClient, {type: "kickQueue.error", total, done: actionNo, sent, skipped, source, message: err?.message || String(err)});
+      safeSend(dashboardClient, {
+        type: "kickQueue.error",
+        runId: kickQueueId,
+        total,
+        done: actionNo,
+        sent,
+        skipped,
+        source,
+        message: err?.message || String(err)
+      });
+      activeKickRun = null;
       return {started: true, sent, skipped, total, error: err?.message || String(err)};
     }
 
+    activeKickRun = null;
     safeSend(dashboardClient, {
       type: "kickQueue.done",
+      runId: kickQueueId,
       total,
       done: actionNo,
-      completed,
+      completed: sent,
       sent,
       skipped,
       source,
-      mode: "direct-dispatch-no-result-queue",
+      mode: "anti-stall-direct-dispatch-v2",
       dispatched: true,
-      note: "Semua vote dikirim tanpa menunggu hasil vote/job. room.kick.result dan job.get tetap dicatat sebagai hasil async bila diterima."
+      note: "Semua vote telah didispatch tanpa menunggu hasil vote/job. room.kick.result dan job.get tetap diproses async jika upstream mengirimkannya."
     });
     return {started: true, sent, skipped, total};
   }
@@ -1661,9 +1749,7 @@ wss.on("connection", dashboard => {
         : [];
       autoKick.loopCount = Math.max(1, Math.min(100, Number(msg.loopCount) || 1));
       autoKick.socketDelayMs = Math.max(0, Math.min(60000, Number(msg.socketDelayMs) || 0));
-      autoKick.delayMs = clampDelayMs(
-        msg.delayMs ?? msg.voteDelayMs ?? msg.socketDelayMs ?? 0
-      );
+      autoKick.delayMs = clampDelayMs(msg.delayMs);
       autoKick.sequentialMode = msg.sequentialMode === true;
       if (!autoKick.enabled) stopAutoKickCountdown("disabled");
       else autoKickState(autoKick.countdownEndAt ? "countdown" : "armed");
@@ -1705,14 +1791,22 @@ wss.on("connection", dashboard => {
       const targets = Array.isArray(msg.targets)
         ? [...new Set(msg.targets.map(v => String(v || "").trim()).filter(Boolean))].slice(0, 10)
         : [];
-      // Frontend owns the kick timing. Accept delayMs directly and the
-      // frontend aliases voteDelayMs/socketDelayMs for compatibility.
       const delayMs = clampDelayMs(
-        msg.delayMs ?? msg.voteDelayMs ?? msg.socketDelayMs ?? 0
+        msg.delayMs ?? msg.voteDelayMs ?? msg.socketDelayMs ?? msg.loopDelayMs ?? 0
       );
       const loopCount = Math.max(1, Math.min(100, Number(msg.loopCount) || 1));
+      const targetDelaysMs = Array.isArray(msg.targetDelaysMs)
+        ? msg.targetDelaysMs.slice(0, targets.length).map(value => clampDelayMs(value))
+        : [];
       if (!room || !targets.length) return;
-      runKickQueue(room, targets, delayMs, loopCount, "kickAll");
+      runKickQueue(room, targets, delayMs, loopCount, "kickAll", {
+        delayMs,
+        voteDelayMs: msg.voteDelayMs,
+        socketDelayMs: msg.socketDelayMs,
+        loopDelayMs: msg.loopDelayMs,
+        targetDelaysMs,
+        sequentialMode: msg.sequentialMode === true
+      });
       return;
     }
 
@@ -1741,7 +1835,7 @@ export class MigMasterSession extends DurableObject {
         service: "migmaster-backend",
         websocket: "/ws",
         mig33Endpoint: MIG_WS_URL,
-        backendVersion: "persistent-account-sockets-kickall-v5-cloudflare-2026-09-07-kickresult-joinfixed-ackorder"
+        backendVersion: "migmaster-cloudflare-final-v2-anti-stall-vote-joinfixed-523wsfix-2026-09-07"
       });
     }
 
@@ -1774,7 +1868,7 @@ export default {
         service: "migmaster-backend",
         websocket: "/ws",
         mig33Endpoint: env?.MIG_WS_URL || DEFAULT_MIG_WS_URL,
-        backendVersion: "persistent-account-sockets-kickall-v5-cloudflare-2026-09-07-kickresult-joinfixed-ackorder"
+        backendVersion: "migmaster-cloudflare-final-v2-anti-stall-vote-joinfixed-523wsfix-2026-09-07"
       });
     }
 
@@ -1783,7 +1877,7 @@ export default {
         ok: true,
         service: "migmaster-backend",
         websocket: "/ws",
-        backendVersion: "persistent-account-sockets-kickall-v5-cloudflare-2026-09-07-kickresult-joinfixed-ackorder"
+        backendVersion: "migmaster-cloudflare-final-v2-anti-stall-vote-joinfixed-523wsfix-2026-09-07"
       });
     }
 
