@@ -504,6 +504,19 @@ function connectDashboard(){
  ui.onmessage=e=>{
   let d;try{d=JSON.parse(e.data)}catch{return}
   if(d.type==="dashboard.ready"){ log(`Backend ativo: ${d.backendVersion||"versão não informada"}`); return; }
+  // The backend forwards the real API frame before its derived dashboard status.
+  // session.ready is the authoritative login-success event, so reflect it directly
+  // in the UI. This is protocol-based, not a guessed success heuristic.
+  if(d.type==="api" && d.data && d.data.type==="session.ready"){
+   const i=Number(d.index);
+   if(Number.isInteger(i) && accounts[i]){
+    accounts[i].status="online";
+    accounts[i].balance=accounts[i].balance||"-";
+    setStatus(i,"Online","online");
+    render();
+   }
+   return;
+  }
   if(d.type==="status"){
    const knownStatus=["online","error","offline","auth","connecting","wait","joining"];
    const incoming=knownStatus.includes(String(d.status))?String(d.status):"offline";
