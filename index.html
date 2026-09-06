@@ -499,11 +499,21 @@ function connectDashboard(){
  ui.onopen=()=>{
    backendConnected=true; backendRetryDelay=1000;
    log("Dashboard ↔ backend OPEN");
-    syncAutoKickConfig();
+   // Re-request authoritative backend state after every dashboard reconnect.
+   // This never logs an account in again.
+   send({action:"dashboard.sync"});
+   syncAutoKickConfig();
  };
  ui.onmessage=e=>{
   let d;try{d=JSON.parse(e.data)}catch{return}
-  if(d.type==="dashboard.ready"){ log(`Backend ativo: ${d.backendVersion||"versão não informada"}`); return; }
+  if(d.type==="dashboard.ready"){
+   const version=d.backendVersion||"versão não informada";
+   log(`Backend ativo: ${version}`);
+   if(!d.backendVersion){
+     log("PERINGATAN: backend yang terhubung tidak mengirim versi. Pastikan server.js versi terbaru sudah dideploy.");
+   }
+   return;
+  }
   // The backend forwards the real API frame before its derived dashboard status.
   // session.ready is the authoritative login-success event, so reflect it directly
   // in the UI. This is protocol-based, not a guessed success heuristic.
@@ -529,9 +539,29 @@ function connectDashboard(){
    const status=(current==="online" && !["error","offline","online"].includes(incoming))?"online":incoming;
    const cls=status==="online"?"online":status==="error"?"error":status==="offline"?"offline":"wait";
    accounts[d.index].status=status;
+   if(d.username!=null) accounts[d.index].username=String(d.username||"");
    if(d.balance){accounts[d.index].balance=d.balance;$(`b${d.index}`).textContent=d.balance}
+   // Keep the dashboard's local room view aligned with the backend snapshot.
+   // Room membership itself remains authoritative on the backend account socket.
+   if(Array.isArray(d.joinedRooms)) accounts[d.index].joinedRooms=[...new Set(d.joinedRooms.map(v=>String(v||"").trim()).filter(Boolean))];
+   if(Array.isArray(d.requestedRooms)) accounts[d.index].requestedRooms=[...new Set(d.requestedRooms.map(v=>String(v||"").trim()).filter(Boolean))];
    setStatus(d.index,status+(d.message?": "+d.message:""),cls);
    render();
+   return;
+  }
+  if(d.type==="account.snapshot"){
+   const idx=Number(d.index);
+   if(Number.isInteger(idx) && accounts[idx]){
+     if(d.username!=null) accounts[idx].username=String(d.username||"");
+     accounts[idx].status=d.ready&&d.socketOpen?"online":(d.socketOpen?"connecting":"offline");
+     accounts[idx].joinedRooms=Array.isArray(d.joinedRooms)?[...new Set(d.joinedRooms.map(v=>String(v||"").trim()).filter(Boolean))]:[];
+     accounts[idx].requestedRooms=Array.isArray(d.requestedRooms)?[...new Set(d.requestedRooms.map(v=>String(v||"").trim()).filter(Boolean))]:[];
+     render();
+   }
+   return;
+  }
+  if(d.type==="dashboard.sync.done"){
+   log(`State backend disinkronkan: ${Number(d.connectedAccounts)||0}/10 akun ONLINE, ${Number(d.joinedAccountCount)||0} akun punya membership room tercatat.`);
    return;
   }
   if(d.type==="balance"){accounts[d.index].balance=d.balance;$(`b${d.index}`).textContent=d.balance;render();return}
