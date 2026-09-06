@@ -694,20 +694,23 @@ $('balanceAll').onclick=()=>send({action:'balanceAll'});
   const btn=$('disconnectAll');
   if(!btn)return;
 
-  // UI logout is local and immediate. It never waits for a backend response.
-  accounts.forEach((account,index)=>{
-    account.status='offline';
-    account.balance='-';
-    setStatus(index,'Offline','offline');
-    if($('b'+index))$('b'+index).textContent='-';
-  });
+  // Logout is a local UI reset first. It never waits for an ACK, close event,
+  // timeout, or reconnect. Repeated taps are safe and always restore the button.
+  btn.disabled=false;
+  btn.textContent='Logout';
+  for(let i=0;i<10;i++){
+    accounts[i].status='offline';
+    accounts[i].balance='-';
+    setStatus(i,'Offline','offline');
+    if($('b'+i))$('b'+i).textContent='-';
+  }
   render();
   btn.disabled=false;
   btn.textContent='Logout';
-  log('Logout: UI dikembalikan ke STANDBY.');
+  log('Logout: semua indikator dikembalikan ke STANDBY.');
 
-  // Backend cleanup is best-effort only.
-  try { send({action:'logoutAll'}); } catch(e) { log('Logout backend: '+e.message); }
+  // Backend cleanup is best-effort only and cannot affect the local button state.
+  try { send({action:'logoutAll'}); } catch(e) {}
  };
 $('messageAll').onclick=()=>{
  const room=$('room').value.trim(),message=$('message').value;
