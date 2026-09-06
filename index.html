@@ -191,7 +191,7 @@ pre.log{height:220px;overflow:auto;background:#020617;border-radius:12px;padding
 const $=id=>document.getElementById(id);
 const accounts=Array.from({length:10},()=>({username:"",password:"",status:"offline",balance:"-"}));
 let ui=null;
-let backendRetryTimer=null, backendRetryDelay=1000, backendConnected=false;
+let backendRetryTimer=null, backendRetryDelay=1000, backendConnected=false, logoutResetTimer=null;
 let participantUsers=[];
 let autoKickRemainingMs=null;
 let autoKickDeadlineAt=0;
@@ -351,7 +351,7 @@ function render(){
    }
    if(!hasAccount)loginList.innerHTML='<div class="login-empty">Belum ada akun. Gunakan Generate Troop atau Edit untuk mengisi akun.</div>';
  }
- for(let i=0;i<10;i++)setStatus(i,accounts[i].status==="online"?"Online":"Offline",accounts[i].status==="online"?"online":"offline");
+ for(let i=0;i<10;i++){ const st=accounts[i].status; const map={online:["Online","online"],error:["Error","error"],auth:["AUTH","wait"],connecting:["Connecting...","wait"],wait:["AUTH","wait"],offline:["Offline","offline"]}; const v=map[st]||[st||"Offline","offline"]; setStatus(i,v[0],v[1]); }
 }
 function readAccounts(){return accounts;}
 function editLogin(i){
@@ -543,6 +543,7 @@ function connectDashboard(){
   if(d.type==="kick.done" || d.type==="kickQueue.done"){kickProgress.done=Math.min(Number(d.total??kickProgress.total),Number(d.done??d.total??kickProgress.total));kickProgress.total=Number(d.total??kickProgress.total);kickProgress.running=false;renderKickProgress();$("kickAll").disabled=false;$("kickAll").textContent="Kick All";return;}
   if(d.type==="autoKick.triggered"){ return; }
   if(d.type==="logout.done"){
+    if(logoutResetTimer){clearTimeout(logoutResetTimer);logoutResetTimer=null;}
     accounts.forEach((account,index)=>{
       account.status="offline"; account.balance="-";
       setStatus(index,"Offline","offline"); $(`b${index}`).textContent="-";
@@ -689,12 +690,23 @@ $('joinAll').onclick=()=>send({action:'joinAll',room:$('room').value.trim()});
 $('leaveAll').onclick=()=>send({action:'leaveAll',room:$('room').value.trim()});
 $('balanceAll').onclick=()=>send({action:'balanceAll'});
  $('disconnectAll').onclick=()=>{
+  if($('disconnectAll').disabled)return;
   $('disconnectAll').disabled=true;
   $('disconnectAll').textContent='Logging out...';
   if(!send({action:'logoutAll'})){
     $('disconnectAll').disabled=false;
     $('disconnectAll').textContent='Logout';
+    return;
   }
+  // Failsafe: never leave the button stuck if the acknowledgement is lost.
+  if(logoutResetTimer)clearTimeout(logoutResetTimer);
+  logoutResetTimer=setTimeout(()=>{
+    logoutResetTimer=null;
+    accounts.forEach((account,index)=>{account.status='offline';account.balance='-';setStatus(index,'Offline','offline');if($('b'+index))$('b'+index).textContent='-';});
+    $('disconnectAll').disabled=false;
+    $('disconnectAll').textContent='Logout';
+    log('Logout selesai (failsafe UI)');
+  },3000);
  };
 $('messageAll').onclick=()=>{
  const room=$('room').value.trim(),message=$('message').value;
