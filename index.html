@@ -690,23 +690,26 @@ $('joinAll').onclick=()=>send({action:'joinAll',room:$('room').value.trim()});
 $('leaveAll').onclick=()=>send({action:'leaveAll',room:$('room').value.trim()});
 $('balanceAll').onclick=()=>send({action:'balanceAll'});
  $('disconnectAll').onclick=()=>{
-  if($('disconnectAll').disabled)return;
-  $('disconnectAll').disabled=true;
-  $('disconnectAll').textContent='Logging out...';
-  if(!send({action:'logoutAll'})){
-    $('disconnectAll').disabled=false;
-    $('disconnectAll').textContent='Logout';
-    return;
-  }
-  // Failsafe: never leave the button stuck if the acknowledgement is lost.
-  if(logoutResetTimer)clearTimeout(logoutResetTimer);
-  logoutResetTimer=setTimeout(()=>{
-    logoutResetTimer=null;
-    accounts.forEach((account,index)=>{account.status='offline';account.balance='-';setStatus(index,'Offline','offline');if($('b'+index))$('b'+index).textContent='-';});
-    $('disconnectAll').disabled=false;
-    $('disconnectAll').textContent='Logout';
-    log('Logout selesai (failsafe UI)');
-  },3000);
+  const btn=$('disconnectAll');
+  if(!btn || btn.dataset.busy==='1')return;
+  btn.dataset.busy='1';
+
+  // Reset UI IMMEDIATELY. Do not wait for the backend/socket ACK.
+  accounts.forEach((account,index)=>{
+    account.status='offline';
+    account.balance='-';
+    account.authTimer=null;
+    setStatus(index,'Offline','offline');
+    if($('b'+index))$('b'+index).textContent='-';
+  });
+  render();
+  btn.disabled=false;
+  btn.textContent='Logout';
+  log('Logout dimulai — UI langsung kembali STANDBY.');
+
+  // Send cleanup in the background; UI never depends on this response.
+  try { send({action:'logoutAll'}); } catch(e) { log('Logout backend: '+e.message); }
+  setTimeout(()=>{ btn.dataset.busy='0'; },250);
  };
 $('messageAll').onclick=()=>{
  const room=$('room').value.trim(),message=$('message').value;
