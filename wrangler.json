@@ -1,30 +1,22 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "migmaster-cloudflare-backend",
-  "main": "./index.js",
-  "compatibility_date": "2026-09-05",
-  "compatibility_flags": [
-    "nodejs_compat"
-  ],
-  "vars": {
-    "MIG_WS_URL": "wss://developer.mig33.id/developer/ws"
-  },
+  "name": "migmaster-backends",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-06",
   "durable_objects": {
     "bindings": [
       {
-        "name": "MIGMASTER_SESSIONS",
+        "name": "MIGMASTER_SESSION",
         "class_name": "MigMasterSession"
       }
     ]
   },
-  "migrations": [
-    {
-      "tag": "v1",
-      "new_sqlite_classes": [
-        "MigMasterSession"
-      ]
+  "exports": {
+    "MigMasterSession": {
+      "type": "durable-object",
+      "storage": "sqlite"
     }
-  ],
+  },
   "observability": {
     "enabled": true
   }

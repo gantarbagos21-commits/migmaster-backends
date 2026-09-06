@@ -1,12 +1,14 @@
 {
-  "name": "migmaster-vercel",
-  "version": "1.0.2",
+  "name": "migmaster-cloudflare-v5",
+  "version": "5.0.0-cloudflare",
   "private": true,
-  "main": "api/index.js",
+  "type": "module",
   "scripts": {
-    "build": "node -e \"console.log('MigMaster Vercel Node build OK')\""
+    "deploy": "wrangler deploy --config ./wrangler.json",
+    "dev": "wrangler dev --config ./wrangler.json",
+    "check": "wrangler deploy --dry-run --config ./wrangler.json"
   },
-  "engines": {
-    "node": ">=18"
+  "devDependencies": {
+    "wrangler": "^4.129.0"
   }
 }
