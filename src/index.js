@@ -341,6 +341,7 @@ function accountState() {
     pendingKickDispatches: [],
     kickRunIds: new Set(),
     completedKickActions: new Set(),
+    acknowledgedKickActions: new Set(),
     outboundScheduler: null,
     authTimer: null,
     authFailed: false,
@@ -371,7 +372,7 @@ const autoKick = {
 wss.on("connection", dashboard => {
   dashboardClient = dashboard;
 
-  safeSend(dashboardClient, {type: "dashboard.ready", accounts: 10, backendVersion: "persistent-account-sockets-kickall-v5-cloudflare-join-fixed-2026-09-06"});
+  safeSend(dashboardClient, {type: "dashboard.ready", accounts: 10, backendVersion: "persistent-account-sockets-kickall-v5-cloudflare-2026-09-07-kickresult-joinfixed"});
 
   function dashboardStatus(i, status, extra = {}) {
     safeSend(dashboardClient, {type: "status", index: i, status, ...extra});
@@ -652,6 +653,45 @@ wss.on("connection", dashboard => {
     scheduleJobPoll(i);
   }
 
+  function handleKickResult(i, data) {
+    const a = accounts[i];
+    const payload = responsePayload(data);
+    const errorText = responseError(data);
+    const status = String(payload?.status || payload?.state || data?.status || "").toLowerCase();
+    const failed = !!errorText || ["error", "failed", "failure", "rejected", "denied"].includes(status);
+    if (failed) return false;
+
+    const jobId = queuedJobId(data);
+    let matchedJobId = jobId && a.pendingJobs.has(jobId) ? jobId : "";
+    if (!matchedJobId) {
+      const room = String(payload?.room || payload?.room_name || data?.room || "").trim();
+      const target = String(
+        payload?.target_username || payload?.target || data?.target_username || data?.target || ""
+      ).trim();
+      for (const [pendingId, job] of a.pendingJobs.entries()) {
+        if (job.command !== "room.kick") continue;
+        if (room && job.room && !roomMatches(room, job.room)) continue;
+        if (target && job.target && target !== job.target) continue;
+        matchedJobId = pendingId;
+        break;
+      }
+    }
+    if (!matchedJobId) return false;
+
+    const job = a.pendingJobs.get(matchedJobId);
+    if (!job || job.command !== "room.kick") return false;
+    const actionNo = Number(job.actionNo || 0);
+    if (Number.isFinite(actionNo) && actionNo > 0) {
+      a.acknowledgedKickActions.add(actionNo);
+    }
+    safeSend(dashboardClient, {
+      type: "log",
+      index: i,
+      message: `API room.kick.result diterima${job.target ? `: ${job.target}` : ""}; job ${matchedJobId} tetap diverifikasi via job.get.`
+    });
+    return true;
+  }
+
   function handleJobStatus(i, data) {
     const jobId = queuedJobId(data);
     if (!jobId) return;
@@ -845,6 +885,7 @@ wss.on("connection", dashboard => {
         safeSend(ws, {type: "pong"});
       }
       safeSend(dashboardClient, {type: "api", index: i, data});
+      if (data.type === "room.kick.result") handleKickResult(i, data);
       if (String(data?.type || "").endsWith(".queued")) trackQueuedJob(i, data);
       // The API documentation defines job.get by request shape and job fields,
       // but does not require one single response event name. Only process a
@@ -1203,7 +1244,10 @@ wss.on("connection", dashboard => {
     }
 
     commandQueueRunning = true;
-    accounts.forEach(a => a.completedKickActions.clear());
+    accounts.forEach(a => {
+      a.completedKickActions.clear();
+      a.acknowledgedKickActions.clear();
+    });
     let actionNo = 0;
     let sent = 0;
     let skipped = 0;
@@ -1223,19 +1267,16 @@ wss.on("connection", dashboard => {
 
     const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-    async function waitForActions(actionNos, timeoutMs = 70000) {
-      const wanted = new Set(actionNos);
+    async function waitForActionProgress(actionNo, timeoutMs = 10000) {
       const startedAt = Date.now();
-      while (wanted.size && Date.now() - startedAt < timeoutMs) {
+      while (Date.now() - startedAt < timeoutMs) {
         for (const a of accounts) {
-          for (const action of wanted) {
-            if (a.completedKickActions.has(action)) wanted.delete(action);
-          }
+          if (a.completedKickActions.has(actionNo)) return "terminal";
+          if (a.acknowledgedKickActions.has(actionNo)) return "acknowledged";
         }
-        if (!wanted.size) return true;
-        await sleep(250);
+        await sleep(100);
       }
-      return wanted.size === 0;
+      return "timeout";
     }
 
     try {
@@ -1300,14 +1341,20 @@ wss.on("connection", dashboard => {
             });
 
             if (didSend) {
-              const finished = await waitForActions([currentAction], 70000);
-              if (finished && accounts.some(a => a.completedKickActions.has(currentAction))) {
+              const progress = await waitForActionProgress(currentAction, 10000);
+              if (progress === "terminal") {
                 completed = Math.min(total, completed + 1);
+              } else if (progress === "acknowledged") {
+                safeSend(dashboardClient, {
+                  type: "log",
+                  index: accountIndex,
+                  message: `KICK target ${target}: room.kick.result diterima dari voter #${accountIndex + 1}; lanjut voter berikutnya, job.get tetap menjadi verifikasi akhir.`
+                });
               } else {
                 safeSend(dashboardClient, {
                   type: "log",
                   index: accountIndex,
-                  message: `KICK target ${target}: voter #${accountIndex + 1} belum mencapai status terminal setelah timeout; voter berikutnya tetap dilanjutkan.`
+                  message: `KICK target ${target}: tidak menerima room.kick.result maupun status terminal dalam 10 detik; voter berikutnya tetap dilanjutkan.`
                 });
               }
             }
@@ -1351,6 +1398,97 @@ wss.on("connection", dashboard => {
     });
     return {started: true, sent, skipped, total};
   }
+
+  dashboard.on("message", async raw => {
+    let msg;
+    try { msg = JSON.parse(raw.toString()); }
+    catch { return; }
+
+    const i = Number(msg.index);
+
+    if (msg.action === "dashboard.sync") {
+      sendDashboardSnapshot();
+      safeSend(dashboardClient, {
+        type: "dashboard.sync.done",
+        accounts: accounts.length,
+        connectedAccounts: accounts.filter(a => a.ready && a.ws?.readyState === WebSocket.OPEN).length,
+        joinedAccountCount: accounts.filter(a => a.joined.size > 0).length
+      });
+      return;
+    }
+
+    if (msg.action === "login" && Number.isInteger(i) && i >= 0 && i < 10) {
+      accounts[i].username = String(msg.username || "").trim();
+      accounts[i].password = String(msg.password || "");
+
+      // The API documents one WebSocket per username. Never let a relogin
+      // race an existing local socket; close it first, then create the new one.
+      for (let n = 0; n < 10; n++) {
+        if (n === i) continue;
+        if (accounts[n].username && accounts[n].username === accounts[i].username) {
+          if (accounts[n].ws || accounts[n].ready) {
+            safeSend(dashboardClient, {type: "log", index: i, message: `LOGIN dibatalkan: username ${accounts[i].username} sudah dipakai koneksi #${n + 1}`});
+            dashboardStatus(i, "error", {message: "Username sudah memiliki koneksi WebSocket lain"});
+            return;
+          }
+        }
+      }
+
+      closeAccount(i, true).then(() => connectAccount(i, {resetBackoff: true}));
+      return;
+    }
+
+    if (msg.action === "disconnect" && Number.isInteger(i) && i >= 0 && i < 10) {
+      closeAccount(i, true);
+      return;
+    }
+
+    if (msg.action === "loginAll") {
+      const requested = new Map();
+      for (let n = 0; n < 10; n++) {
+        const username = String(msg.accounts?.[n]?.username || "").trim();
+        const password = String(msg.accounts?.[n]?.password || "");
+        if (!username || !password) continue;
+        if (requested.has(username)) {
+          safeSend(dashboardClient, {type: "log", index: n, message: `Login All dibatalkan untuk #${n + 1}: username ${username} duplikat pada #${requested.get(username) + 1}`});
+          dashboardStatus(n, "error", {message: "Username duplikat; satu username hanya satu koneksi"});
+          continue;
+        }
+        requested.set(username, n);
+        accounts[n].username = username;
+        accounts[n].password = password;
+      }
+
+      for (let n = 0; n < 10; n++) {
+        if (!requested.has(accounts[n].username) || !accounts[n].password) continue;
+        if (accounts[n].ready && accounts[n].ws?.readyState === WebSocket.OPEN) {
+          safeSend(dashboardClient, {type: "log", index: n, message: "Login All: sudah Online, login ulang dilewati"});
+          continue;
+        }
+        closeAccount(n, true).then(() => connectAccount(n, {resetBackoff: true}));
+      }
+      return;
+    }
+
+    if (msg.action === "disconnectAll") {
+      for (let n = 0; n < 10; n++) closeAccount(n, true);
+      safeSend(dashboardClient, {type: "logout.done"});
+      return;
+    }
+
+    if (msg.action === "logoutAll") {
+      // Disconnect every account first, then acknowledge the dashboard.
+      // The API has no separate logout command; closing each WebSocket is
+      // the actual protocol-level disconnect.
+      for (let n = 0; n < 10; n++) {
+        try { closeAccount(n, true); } catch (err) {
+          safeSend(dashboardClient, {type: "log", index: n, message: `Logout cleanup error: ${publicError(err)}`});
+          dashboardStatus(n, "offline");
+        }
+      }
+      safeSend(dashboardClient, {type: "logout.done"});
+      return;
+    }
 
   async function joinAll(room) {
     const name = String(room || "").trim();
@@ -1445,97 +1583,6 @@ wss.on("connection", dashboard => {
     });
     return {started: true, sent, skipped, total: 10};
   }
-
-  dashboard.on("message", async raw => {
-    let msg;
-    try { msg = JSON.parse(raw.toString()); }
-    catch { return; }
-
-    const i = Number(msg.index);
-
-    if (msg.action === "dashboard.sync") {
-      sendDashboardSnapshot();
-      safeSend(dashboardClient, {
-        type: "dashboard.sync.done",
-        accounts: accounts.length,
-        connectedAccounts: accounts.filter(a => a.ready && a.ws?.readyState === WebSocket.OPEN).length,
-        joinedAccountCount: accounts.filter(a => a.joined.size > 0).length
-      });
-      return;
-    }
-
-    if (msg.action === "login" && Number.isInteger(i) && i >= 0 && i < 10) {
-      accounts[i].username = String(msg.username || "").trim();
-      accounts[i].password = String(msg.password || "");
-
-      // The API documents one WebSocket per username. Never let a relogin
-      // race an existing local socket; close it first, then create the new one.
-      for (let n = 0; n < 10; n++) {
-        if (n === i) continue;
-        if (accounts[n].username && accounts[n].username === accounts[i].username) {
-          if (accounts[n].ws || accounts[n].ready) {
-            safeSend(dashboardClient, {type: "log", index: i, message: `LOGIN dibatalkan: username ${accounts[i].username} sudah dipakai koneksi #${n + 1}`});
-            dashboardStatus(i, "error", {message: "Username sudah memiliki koneksi WebSocket lain"});
-            return;
-          }
-        }
-      }
-
-      closeAccount(i, true).then(() => connectAccount(i, {resetBackoff: true}));
-      return;
-    }
-
-    if (msg.action === "disconnect" && Number.isInteger(i) && i >= 0 && i < 10) {
-      closeAccount(i, true);
-      return;
-    }
-
-    if (msg.action === "loginAll") {
-      const requested = new Map();
-      for (let n = 0; n < 10; n++) {
-        const username = String(msg.accounts?.[n]?.username || "").trim();
-        const password = String(msg.accounts?.[n]?.password || "");
-        if (!username || !password) continue;
-        if (requested.has(username)) {
-          safeSend(dashboardClient, {type: "log", index: n, message: `Login All dibatalkan untuk #${n + 1}: username ${username} duplikat pada #${requested.get(username) + 1}`});
-          dashboardStatus(n, "error", {message: "Username duplikat; satu username hanya satu koneksi"});
-          continue;
-        }
-        requested.set(username, n);
-        accounts[n].username = username;
-        accounts[n].password = password;
-      }
-
-      for (let n = 0; n < 10; n++) {
-        if (!requested.has(accounts[n].username) || !accounts[n].password) continue;
-        if (accounts[n].ready && accounts[n].ws?.readyState === WebSocket.OPEN) {
-          safeSend(dashboardClient, {type: "log", index: n, message: "Login All: sudah Online, login ulang dilewati"});
-          continue;
-        }
-        closeAccount(n, true).then(() => connectAccount(n, {resetBackoff: true}));
-      }
-      return;
-    }
-
-    if (msg.action === "disconnectAll") {
-      for (let n = 0; n < 10; n++) closeAccount(n, true);
-      safeSend(dashboardClient, {type: "logout.done"});
-      return;
-    }
-
-    if (msg.action === "logoutAll") {
-      // Disconnect every account first, then acknowledge the dashboard.
-      // The API has no separate logout command; closing each WebSocket is
-      // the actual protocol-level disconnect.
-      for (let n = 0; n < 10; n++) {
-        try { closeAccount(n, true); } catch (err) {
-          safeSend(dashboardClient, {type: "log", index: n, message: `Logout cleanup error: ${publicError(err)}`});
-          dashboardStatus(n, "offline");
-        }
-      }
-      safeSend(dashboardClient, {type: "logout.done"});
-      return;
-    }
 
     if (msg.action === "joinAll") {
       const room = String(msg.room || "").trim();
@@ -1707,7 +1754,7 @@ export class MigMasterSession extends DurableObject {
         service: "migmaster-backend",
         websocket: "/ws",
         mig33Endpoint: MIG_WS_URL,
-        backendVersion: "persistent-account-sockets-kickall-v5-cloudflare-join-fixed-2026-09-06"
+        backendVersion: "persistent-account-sockets-kickall-v5-cloudflare-2026-09-07-kickresult-joinfixed"
       });
     }
 
@@ -1740,7 +1787,7 @@ export default {
         service: "migmaster-backend",
         websocket: "/ws",
         mig33Endpoint: env?.MIG_WS_URL || DEFAULT_MIG_WS_URL,
-        backendVersion: "persistent-account-sockets-kickall-v5-cloudflare-join-fixed-2026-09-06"
+        backendVersion: "persistent-account-sockets-kickall-v5-cloudflare-2026-09-07-kickresult-joinfixed"
       });
     }
 
@@ -1749,7 +1796,7 @@ export default {
         ok: true,
         service: "migmaster-backend",
         websocket: "/ws",
-        backendVersion: "persistent-account-sockets-kickall-v5-cloudflare-join-fixed-2026-09-06"
+        backendVersion: "persistent-account-sockets-kickall-v5-cloudflare-2026-09-07-kickresult-joinfixed"
       });
     }
 
