@@ -371,7 +371,7 @@ const autoKick = {
 wss.on("connection", dashboard => {
   dashboardClient = dashboard;
 
-  safeSend(dashboardClient, {type: "dashboard.ready", accounts: 10, backendVersion: "persistent-account-sockets-kickall-v5-cloudflare-2026-09-06"});
+  safeSend(dashboardClient, {type: "dashboard.ready", accounts: 10, backendVersion: "persistent-account-sockets-kickall-v5-cloudflare-join-fixed-2026-09-06"});
 
   function dashboardStatus(i, status, extra = {}) {
     safeSend(dashboardClient, {type: "status", index: i, status, ...extra});
@@ -1352,6 +1352,100 @@ wss.on("connection", dashboard => {
     return {started: true, sent, skipped, total};
   }
 
+  async function joinAll(room) {
+    const name = String(room || "").trim();
+    if (!name) {
+      safeSend(dashboardClient, {type: "error", index: 0, message: "Nama room wajib diisi."});
+      safeSend(dashboardClient, {type: "log", index: 0, message: "JOIN dibatalkan: nama room kosong"});
+      return {started: false, sent: 0, skipped: 10};
+    }
+
+    // Always acknowledge the dashboard command, including when all accounts
+    // are offline. This prevents a JOIN click from appearing to do nothing.
+    safeSend(dashboardClient, {type: "joinAll.start", room: name});
+    safeSend(dashboardClient, {type: "log", index: 0, message: `JOIN ALL diminta: ${name}`});
+
+    let sent = 0;
+    let skipped = 0;
+
+    for (let i = 0; i < 10; i++) {
+      const a = accounts[i];
+      const socketOpen = !!(a.ws && a.ws.readyState === WebSocket.OPEN);
+
+      if (!socketOpen || !a.ready) {
+        skipped++;
+        safeSend(dashboardClient, {
+          type: "log",
+          index: i,
+          message: `JOIN dilewati: ID #${i + 1} belum Online/session.ready`
+        });
+        safeSend(dashboardClient, {
+          type: "joinAll.step",
+          index: i,
+          room: name,
+          status: "skipped",
+          reason: "account-not-ready"
+        });
+        continue;
+      }
+
+      dashboardStatus(i, "joining", {room: name});
+      safeSend(dashboardClient, {type: "log", index: i, message: `JOIN ${name} dikirim`});
+
+      try {
+        const didSend = sendToAccount(i, {type: "room.join", room: name});
+        if (didSend) {
+          sent++;
+          a.pendingJoinRoom = name;
+          a.requestedRooms.add(name);
+          safeSend(dashboardClient, {
+            type: "joinAll.step",
+            index: i,
+            room: name,
+            status: "sent"
+          });
+        } else {
+          skipped++;
+          safeSend(dashboardClient, {
+            type: "joinAll.step",
+            index: i,
+            room: name,
+            status: "skipped",
+            reason: "sendToAccount-failed"
+          });
+        }
+      } catch (err) {
+        skipped++;
+        safeSend(dashboardClient, {
+          type: "log",
+          index: i,
+          message: `JOIN gagal dikirim: ${publicError(err?.message || err)}`
+        });
+        safeSend(dashboardClient, {
+          type: "joinAll.step",
+          index: i,
+          room: name,
+          status: "error",
+          reason: publicError(err?.message || err)
+        });
+      }
+    }
+
+    safeSend(dashboardClient, {
+      type: "joinAll.done",
+      room: name,
+      sent,
+      skipped,
+      total: 10
+    });
+    safeSend(dashboardClient, {
+      type: "log",
+      index: 0,
+      message: `JOIN ALL selesai: ${sent} dikirim, ${skipped} dilewati, room=${name}`
+    });
+    return {started: true, sent, skipped, total: 10};
+  }
+
   dashboard.on("message", async raw => {
     let msg;
     try { msg = JSON.parse(raw.toString()); }
@@ -1613,7 +1707,7 @@ export class MigMasterSession extends DurableObject {
         service: "migmaster-backend",
         websocket: "/ws",
         mig33Endpoint: MIG_WS_URL,
-        backendVersion: "persistent-account-sockets-kickall-v5-cloudflare-2026-09-06"
+        backendVersion: "persistent-account-sockets-kickall-v5-cloudflare-join-fixed-2026-09-06"
       });
     }
 
@@ -1622,7 +1716,7 @@ export class MigMasterSession extends DurableObject {
     }
 
     DASHBOARD_TOKEN = this.env?.DASHBOARD_TOKEN || "";
-MIG_WS_URL = this.env?.MIG_WS_URL || DEFAULT_MIG_WS_URL;
+    MIG_WS_URL = this.env?.MIG_WS_URL || DEFAULT_MIG_WS_URL;
     if (DASHBOARD_TOKEN && url.searchParams.get("token") !== DASHBOARD_TOKEN) {
       return new Response("Unauthorized", { status: 401 });
     }
@@ -1646,7 +1740,7 @@ export default {
         service: "migmaster-backend",
         websocket: "/ws",
         mig33Endpoint: env?.MIG_WS_URL || DEFAULT_MIG_WS_URL,
-        backendVersion: "persistent-account-sockets-kickall-v5-cloudflare-2026-09-06"
+        backendVersion: "persistent-account-sockets-kickall-v5-cloudflare-join-fixed-2026-09-06"
       });
     }
 
@@ -1655,7 +1749,7 @@ export default {
         ok: true,
         service: "migmaster-backend",
         websocket: "/ws",
-        backendVersion: "persistent-account-sockets-kickall-v5-cloudflare-2026-09-06"
+        backendVersion: "persistent-account-sockets-kickall-v5-cloudflare-join-fixed-2026-09-06"
       });
     }
 
