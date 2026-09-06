@@ -1,14 +1,14 @@
 {
-  "name": "migmaster-cloudflare-v5",
-  "version": "5.0.2-cloudflare-final-v2-anti-stall-vote",
+  "name": "migmaster-node-persistent",
+  "version": "3.0.0-node-persistent-anti-stall-vote",
   "private": true,
   "type": "module",
   "scripts": {
-    "deploy": "wrangler deploy --config ./wrangler.json",
-    "dev": "wrangler dev --config ./wrangler.json",
-    "check": "wrangler deploy --dry-run --config ./wrangler.json"
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "check": "node --check src/index.js"
   },
-  "devDependencies": {
-    "wrangler": "^4.129.0"
+  "dependencies": {
+    "ws": "^8.18.3"
   }
 }

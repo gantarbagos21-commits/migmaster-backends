@@ -1,75 +1,99 @@
-# MigMaster Cloudflare Backend — FINAL v2 Anti-Macet Vote
+# MigMaster FINAL v3 — Node.js Persistent Backend
 
-Versi FINAL v2 ini dibuat khusus untuk **anti-macet vote** sambil mempertahankan **Join Room** dan seluruh perbaikan backend sebelumnya.
+Backend khusus Node.js persistent untuk MigMaster. Versi ini mempertahankan fix Join Room, login/session, dashboard reconnect, keep-alive, participant list, wallet, Auto Kick, dan Kick All anti-macet dari versi V2, tetapi koneksi akun ke Mig33 dilakukan langsung dari runtime Node.js.
 
-## Anti-macet vote — inti perubahan
+## Kenapa Node.js persistent
 
-- `room.kick` dikirim **langsung** melalui WebSocket.
-- Backend **tidak pernah menunggu** `room.kick.result`, `room.kick.queued`, atau `job.get` sebelum mengirim vote berikutnya.
-- Delay vote hanya menjadi **jarak pengiriman** dan dikendalikan frontend.
-- Mendukung alias frontend: `delayMs`, `voteDelayMs`, `socketDelayMs`, `loopDelayMs`.
-- Maksimum 10 target dan maksimum 100 loop tetap dipertahankan.
-- Pola 10 WebSocket × 10 target tetap didukung selama akun online, `session.ready`, sudah terkonfirmasi Join Room, dan memiliki `rooms.kick`.
-- Satu run Kick All/Auto Kick aktif pada satu waktu. Klik/run kedua ditolak agar dua rangkaian vote tidak saling menimpa.
-- Metadata vote untuk pencatatan hasil async dibatasi agar respons upstream yang terlambat/tidak datang tidak membuat memori bertumbuh tanpa batas.
+Versi Cloudflare sebelumnya gagal pada koneksi keluar ke `wss://developer.mig33.id/developer/ws` dengan pesan `Fetch API cannot load`. V3 menghilangkan lapisan outbound WebSocket Cloudflare dan menggunakan package `ws` langsung dari Node.js.
 
-## Join Room tetap dipertahankan
+## Anti-macet vote
 
-- `joinAll` tetap mengirim `room.join` ke 10 akun yang sudah `session.ready`.
-- `room.join.result` tetap menjadi konfirmasi membership.
-- `joinedRooms` dan `requestedRooms` tetap dikirim saat dashboard reconnect.
-- Kick tetap memeriksa membership room yang sudah dikonfirmasi sebelum `room.kick` dikirim.
+Kick All menggunakan mode `anti-stall-direct-dispatch-v3`:
+- payload tetap `room.kick` sesuai API;
+- tidak menunggu `room.kick.queued`;
+- tidak menunggu `room.kick.result`;
+- tidak menunggu `job.get`;
+- vote berikutnya dikirim langsung setelah `socket.send()` berhasil;
+- delay hanya menjadi pembatas kecepatan pengiriman dan dikontrol frontend;
+- maksimal 10 target dan 10 akun per loop;
+- hanya satu Kick run aktif pada satu waktu agar dua klik/proses tidak saling menimpa;
+- metadata dispatch dibatasi agar response upstream yang macet tidak membuat memori terus bertambah.
 
-## Login / session
+## Join Room tetap
 
-Urutan login tetap mengikuti protokol Mig33:
+Join All tetap mengirim `room.join` ke akun yang sudah `session.ready`. `room.join.result` tetap digunakan sebagai konfirmasi membership. Kick hanya dikirim dari akun yang sudah terkonfirmasi masuk room dan memiliki `rooms.kick` bila permission tersedia.
 
-`auth.required` → `developer.login` → `session.ready`
+## Login dan keep-alive
 
-`session.ready` adalah tanda login sukses. Tidak ada auto-relogin hanya karena dashboard/UI reconnect.
+- login: `auth.required` → `developer.login` → `session.ready`;
+- `session.ready` adalah indikator login sukses;
+- client mengirim JSON `{"type":"ping"}` setiap 50 detik;
+- API tidak memiliki command logout khusus, sehingga logout dilakukan dengan menutup WebSocket;
+- dashboard disconnect tidak memutus WebSocket akun dan tidak memicu relogin otomatis.
 
-## Keep-alive
+## Struktur
 
-Backend tetap mengirim application-level:
-
-```json
-{"type":"ping"}
+```text
+backend/
+├── src/
+│   └── index.js
+├── package.json
+└── README.md
 ```
 
-dengan interval 50 detik.
+## Environment Variables
 
-## Dashboard reconnect
+```text
+PORT=3000
+DASHBOARD_TOKEN=isi_token_yang_sama_dengan_frontend
+MIG_WS_URL=wss://developer.mig33.id/developer/ws
+```
 
-Menutup/reconnect dashboard **tidak menutup WebSocket akun Mig33**. Logout/Disconnect eksplisit tetap menutup socket akun.
+`PORT` dibaca dari environment provider. Server bind ke `0.0.0.0`.
 
-## Outbound WebSocket Cloudflare
-
-Koneksi akun ke upstream menggunakan pola Cloudflare Workers:
-
-`fetch(MIG_WS_URL, { headers: { Upgrade: "websocket" } })`
-
-Jika upstream tidak mengembalikan HTTP 101, backend menampilkan status HTTP yang diterima (termasuk 523) agar diagnosis lebih jelas.
-
-## Environment
-
-- `MIG_WS_URL` = `wss://developer.mig33.id/developer/ws`
-- `DASHBOARD_TOKEN` = token dashboard jika digunakan
-
-## Deploy
+## Jalankan lokal
 
 ```bash
 npm install
-npx wrangler deploy --config ./wrangler.json
+npm start
 ```
 
-## Endpoint frontend
+Health check:
 
-Jika Worker tetap memakai domain yang sama:
+```text
+GET /health
+```
 
-`wss://migmaster-backends.gantarbagos21.workers.dev/ws`
+Dashboard WebSocket:
 
-## Catatan penting
+```text
+wss://DOMAIN-BACKEND-ANDA/ws?token=TOKEN
+```
 
-Mode anti-macet di sini berarti **backend tidak memblokir pengiriman vote berdasarkan hasil vote/job sebelumnya**. Delay frontend tetap dapat digunakan untuk mengatur kecepatan pengiriman.
+Jika frontend tidak menggunakan token, kosongkan `DASHBOARD_TOKEN`.
 
-Jika upstream tetap mengembalikan HTTP 523, itu adalah masalah keterjangkauan endpoint upstream dari jaringan Cloudflare dan bukan antrean vote lokal.
+## Deploy Railway / host Node.js lain
+
+1. Upload folder ini ke GitHub.
+2. Buat service Node.js dari repository tersebut.
+3. Set environment variables `DASHBOARD_TOKEN` dan `MIG_WS_URL`.
+4. Start command: `npm start`.
+5. Pastikan service mendapatkan public HTTPS/WSS domain.
+6. Di frontend isi URL backend WebSocket dengan:
+   `wss://DOMAIN-BACKEND-ANDA/ws?token=TOKEN`
+7. Buka Log dan pastikan akun menunjukkan `WebSocket OPEN`, `auth.required`, lalu `session.ready`.
+8. Jalankan Enter Room — All dan tunggu `JOIN BERHASIL`.
+9. Setelah room confirmed, jalankan Kick All.
+
+## Penting
+
+Jangan deploy V3 sebagai Cloudflare Worker. V3 memang ditujukan untuk runtime Node.js persistent. Railway, VPS, Render, atau host Node.js persistent lain dapat digunakan.
+
+## Pemeriksaan
+
+```bash
+npm install
+npm run check
+```
+
+Tidak ada konfigurasi Durable Object/Wrangler di V3.
