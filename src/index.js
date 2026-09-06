@@ -1,81 +1,88 @@
-import http from "node:http";
-import { WebSocketServer, WebSocket } from "ws";
+import { DurableObject } from "cloudflare:workers";
 
 const DEFAULT_MIG_WS_URL = "wss://developer.mig33.id/developer/ws";
-const MIG_WS_URL = process.env.MIG_WS_URL || DEFAULT_MIG_WS_URL;
-const DASHBOARD_TOKEN = process.env.DASHBOARD_TOKEN || "";
-const PORT = Number(process.env.PORT || 3000);
+let MIG_WS_URL = DEFAULT_MIG_WS_URL;
+let DASHBOARD_TOKEN = "";
 
-// Native Node.js WebSocket connection to Mig33. This is intentionally direct:
-// the persistent Node.js host connects to developer.mig33.id without the
-// Cloudflare Workers outbound-WebSocket layer that produced the HTTP 523/fetch
-// failure in the previous backend.
-const CFWebSocket = {
-  connect(url) {
-    return new Promise((resolve, reject) => {
-      const ws = new WebSocket(url);
-      let settled = false;
-      const fail = (err) => {
-        if (settled) return;
-        settled = true;
-        try { ws.close(); } catch {}
-        reject(err instanceof Error ? err : new Error(String(err)));
-      };
-      ws.once("open", () => {
-        if (settled) return;
-        settled = true;
-        resolve(ws);
-      });
-      ws.once("error", fail);
+// Small compatibility layer so the proven V5 backend logic can run on the
+// Cloudflare Workers WebSocket API without the Node `ws` package.
+class CFWebSocket {
+  static CONNECTING = 0;
+  static OPEN = 1;
+  static CLOSING = 2;
+  static CLOSED = 3;
+
+  constructor(urlOrSocket) {
+    this._handlers = new Map();
+    this._onceHandlers = new Map();
+    this._socket = typeof urlOrSocket === "string"
+      ? new globalThis.WebSocket(urlOrSocket)
+      : urlOrSocket;
+    this._bind();
+  }
+
+  get readyState() { return this._socket.readyState; }
+
+  _emit(name, event) {
+    const set = this._handlers.get(name);
+    if (set) for (const fn of [...set]) { try { fn(...event); } catch {} }
+    const once = this._onceHandlers.get(name);
+    if (once) {
+      this._onceHandlers.delete(name);
+      try { once(...event); } catch {}
+    }
+  }
+
+  _bind() {
+    this._socket.addEventListener("open", event => this._emit("open", [event]));
+    this._socket.addEventListener("message", async event => {
+      let data = event.data;
+      if (data instanceof ArrayBuffer) data = new TextDecoder().decode(data);
+      else if (typeof Blob !== "undefined" && data instanceof Blob) data = await data.text();
+      this._emit("message", [data]);
     });
+    this._socket.addEventListener("error", event => this._emit("error", [event]));
+    this._socket.addEventListener("close", event => {
+      this._emit("close", [event.code, event.reason || ""]);
+    });
+  }
+
+  on(name, fn) {
+    if (!this._handlers.has(name)) this._handlers.set(name, new Set());
+    this._handlers.get(name).add(fn);
+    return this;
+  }
+
+  once(name, fn) {
+    this._onceHandlers.set(name, fn);
+    return this;
+  }
+
+  send(data) { return this._socket.send(data); }
+  close(code = 1000, reason = "") { try { this._socket.close(code, reason); } catch {} }
+  terminate() { try { this._socket.close(1000, "terminated"); } catch {} }
+  ping() { /* Browser/Workers WebSocket has no exposed protocol ping API. */ }
+}
+
+const WebSocket = CFWebSocket;
+
+const wss = {
+  _connectionHandler: null,
+  on(event, handler) {
+    if (event === "connection") this._connectionHandler = handler;
+    return this;
+  },
+  emitConnection(socket) {
+    if (this._connectionHandler) this._connectionHandler(socket);
   }
 };
 
-const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false });
-
-const httpServer = http.createServer((req, res) => {
-  const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
-  if (url.pathname === "/" || url.pathname === "/health") {
-    res.writeHead(200, {"content-type":"application/json; charset=utf-8"});
-    return res.end(JSON.stringify({
-      ok: true,
-      service: "migmaster-node-persistent",
-      websocket: "/ws",
-      mig33Endpoint: MIG_WS_URL,
-      backendVersion: "migmaster-node-final-v3-anti-stall-vote-joinfixed-2026-09-07"
-    }));
-  }
-  res.writeHead(404, {"content-type":"text/plain; charset=utf-8"});
-  res.end("Not found");
-});
-
-function acceptDashboardSocket(socket, req) {
-  const url = new URL(req.url || "/ws", `http://${req.headers.host || "localhost"}`);
-  if (url.pathname !== "/ws") {
-    try { socket.close(1008, "invalid path"); } catch {}
-    return;
-  }
-  if (DASHBOARD_TOKEN && url.searchParams.get("token") !== DASHBOARD_TOKEN) {
-    try { socket.close(1008, "unauthorized"); } catch {}
-    return;
-  }
-  wss.emit("connection", socket, req);
+function jsonResponse(obj, status = 200) {
+  return new Response(JSON.stringify(obj), {
+    status,
+    headers: { "content-type": "application/json; charset=utf-8" }
+  });
 }
-
-httpServer.on("upgrade", (req, socket, head) => {
-  const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
-  if (url.pathname !== "/ws") {
-    socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
-    socket.destroy();
-    return;
-  }
-  if (DASHBOARD_TOKEN && url.searchParams.get("token") !== DASHBOARD_TOKEN) {
-    socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
-    socket.destroy();
-    return;
-  }
-  wss.handleUpgrade(req, socket, head, ws => acceptDashboardSocket(ws, req));
-});
 
 function normalizeUsers(value) {
   const out = [];
@@ -345,6 +352,7 @@ function accountState() {
 
 let dashboardClient = null;
 const accounts = Array.from({length: 10}, accountState);
+let commandQueueRunning = false;
 const autoKick = {
   enabled: false,
   room: "",
@@ -361,16 +369,10 @@ const autoKick = {
   countdownTriggered: false
 };
 
-// Only one kick dispatch run may own the 10x10 sender at a time. This prevents
-// double-clicks/manual+auto overlap from interleaving votes and making the
-// upstream queue appear stuck. The guard is cleared when dispatch finishes;
-// it never waits for room.kick.result or job.get.
-let activeKickRun = null;
-
 wss.on("connection", dashboard => {
   dashboardClient = dashboard;
 
-  safeSend(dashboardClient, {type: "dashboard.ready", accounts: 10, backendVersion: "migmaster-node-final-v3-anti-stall-vote-joinfixed-2026-09-07"});
+  safeSend(dashboardClient, {type: "dashboard.ready", accounts: 10, backendVersion: "persistent-account-sockets-kickall-v5-cloudflare-2026-09-07-kickresult-joinfixed-ackorder"});
 
   function dashboardStatus(i, status, extra = {}) {
     safeSend(dashboardClient, {type: "status", index: i, status, ...extra});
@@ -501,6 +503,12 @@ wss.on("connection", dashboard => {
             index: 0,
             message: "Timer selesai, tetapi belum ada target kick yang dipilih."
           });
+        } else if (commandQueueRunning) {
+          safeSend(dashboardClient, {
+            type: "error",
+            index: 0,
+            message: "Auto Kick tidak dijalankan karena antrian perintah masih berjalan."
+          });
         } else {
           autoKickState("triggering", {remainingMs});
           runKickQueue(
@@ -512,10 +520,7 @@ wss.on("connection", dashboard => {
             {
               socketDelayMs: autoKick.socketDelayMs,
               sequentialMode: autoKick.sequentialMode,
-              loopDelayMs: autoKick.delayMs,
-              delayMs: autoKick.delayMs,
-              voteDelayMs: autoKick.delayMs,
-              targetDelaysMs: autoKick.targetDelaysMs
+              loopDelayMs: autoKick.delayMs
             }
           ).finally(() => {
             if (autoKick.countdownEndAt) {
@@ -850,7 +855,7 @@ wss.on("connection", dashboard => {
     });
   }
 
-  async function connectAccount(i, options = {}) {
+  function connectAccount(i, options = {}) {
     const a = accounts[i];
     stopPing(i);
     stopJobPolling(i);
@@ -870,26 +875,7 @@ wss.on("connection", dashboard => {
 
     dashboardStatus(i, "connecting");
 
-    let ws;
-    try {
-      ws = await CFWebSocket.connect(MIG_WS_URL);
-    } catch (err) {
-      const message = publicError(err?.message || err);
-      a.ready = false;
-      a.ws = null;
-      auditRoom(i, "SOCKET", "connect_error", "", {message});
-      dashboardStatus(i, "error", {
-        message,
-        upstream: MIG_WS_URL
-      });
-      safeSend(dashboardClient, {
-        type: "log",
-        index: i,
-        message: `WebSocket UPSTREAM ERROR: ${message}`
-      });
-      return;
-    }
-
+    const ws = new WebSocket(MIG_WS_URL);
     a.ws = ws;
     ws.on("pong", () => {
       a.lastHeartbeatAt = Date.now();
@@ -1205,31 +1191,21 @@ wss.on("connection", dashboard => {
       return false;
     }
     if (!canSendToAccount(i, payload)) return false;
-
-    // Metadata is best-effort only. It is NOT a dispatch queue and is never
-    // awaited. Keep it bounded so a silent upstream cannot make memory grow
-    // forever when many votes are sent without queued/result responses.
     a.pendingKickDispatches.push({
       room: String(payload?.room || ""),
       target: String(payload?.target_username || ""),
       runId: String(meta.runId || ""),
       loop: Number(meta.loop || 0),
       targetIndex: Number(meta.targetIndex || 0),
-      actionNo: Number(meta.actionNo || 0),
-      sentAt: Date.now()
+      actionNo: Number(meta.actionNo || 0)
     });
-    if (a.pendingKickDispatches.length > 2000) {
-      a.pendingKickDispatches.splice(0, a.pendingKickDispatches.length - 2000);
-    }
-
     try {
-      // room.kick remains the exact documented protocol payload. The sender
-      // returns immediately after socket.send(); no result/job is required
-      // before the next vote is dispatched.
+      // room.kick is a documented queued API command. We send the exact
+      // protocol payload and use job_id/job.get for authoritative completion.
       a.ws.send(JSON.stringify(payload));
       auditRoom(i, "OUT", "room.kick", payload.room, {
         target: payload.target_username,
-        source: "kickDispatchNoWait",
+        source: "kickQueue",
         runId: meta.runId || "",
         actionNo: meta.actionNo || 0
       });
@@ -1240,61 +1216,39 @@ wss.on("connection", dashboard => {
     }
   }
 
-  async function runKickQueue(room, targets, delayMs, loopCount, source = "kickAll", options = {}) {
+  async function runKickQueue(room, targets, delayMs, loopCount, source = "kickAll") {
     if (!room || !targets.length) return {started: false, sent: 0, skipped: 0, total: 0};
-
-    // Compatibility with the existing frontend: delayMs, voteDelayMs,
-    // socketDelayMs and loopDelayMs all mean the frontend-controlled spacing
-    // between outbound votes. targetDelaysMs remains accepted for clients
-    // that already send per-target timing.
-    const resolvedDelayMs = clampDelayMs(
-      options.loopDelayMs ?? options.voteDelayMs ?? options.socketDelayMs ?? delayMs ?? 0
-    );
-    const loopCountSafe = Math.max(1, Math.min(100, Number(loopCount) || 1));
-    const kickQueueId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const uniqueTargets = [...new Set(targets.map(v => String(v || "").trim()).filter(Boolean))].slice(0, 10);
-
-    if (activeKickRun) {
-      safeSend(dashboardClient, {
-        type: "kickQueue.error",
-        room,
-        source,
-        total: 0,
-        done: 0,
-        sent: 0,
-        skipped: 0,
-        message: `Kick run ${activeKickRun} masih aktif; run baru ditolak agar vote tidak saling menimpa.`
-      });
-      return {started: false, sent: 0, skipped: 0, total: 0, busy: true};
+    if (commandQueueRunning) {
+      safeSend(dashboardClient, {type: "error", index: 0, message: "Kick All masih berjalan. Tunggu sampai selesai sebelum menjalankan lagi."});
+      return {started: false, sent: 0, skipped: 0, total: 0};
     }
 
-    activeKickRun = kickQueueId;
-
+    const loopDelayMs = clampDelayMs(delayMs);
+    const kickQueueId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const uniqueTargets = [...new Set(targets.map(v => String(v || "").trim()).filter(Boolean))].slice(0, 10);
     const preflight = uniqueTargets.map(target => ({
       target,
       eligible: accounts.map((a, index) => ({a, index}))
         .filter(({a}) => a.ready && a.ws?.readyState === WebSocket.OPEN && hasJoinedRoom(a, room) && (!a.permissions.length || a.permissions.includes("rooms.kick")))
         .map(({index}) => index + 1)
     }));
-    const voterIds = [...new Set(preflight.flatMap(item => item.eligible))];
-    const voterCount = voterIds.length;
-    const total = uniqueTargets.length * voterCount * loopCountSafe;
+    const voterCount = [...new Set(preflight.flatMap(item => item.eligible))].length;
+    const total = uniqueTargets.length * voterCount * loopCount;
 
     safeSend(dashboardClient, {
       type: "kickQueue.preflight",
       room,
       targets: uniqueTargets,
-      voters: voterIds,
+      voters: [...new Set(preflight.flatMap(item => item.eligible))],
       detail: preflight,
       total,
-      loopCount: loopCountSafe,
+      loopCount,
       source,
       kickQueueId,
-      mode: "anti-stall-direct-dispatch-v2"
+      mode: "sequential-voter-and-target-waves"
     });
 
     if (!voterCount) {
-      activeKickRun = null;
       safeSend(dashboardClient, {
         type: "kickQueue.error",
         total: 0,
@@ -1307,28 +1261,44 @@ wss.on("connection", dashboard => {
       return {started: false, sent: 0, skipped: uniqueTargets.length, total: 0};
     }
 
+    commandQueueRunning = true;
+    accounts.forEach(a => {
+      a.completedKickActions.clear();
+      a.acknowledgedKickActions.clear();
+    });
     let actionNo = 0;
     let sent = 0;
     let skipped = 0;
-    const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+    let completed = 0;
 
     safeSend(dashboardClient, {
       type: "kickQueue.start",
       room,
       targets: uniqueTargets,
-      delayMs: resolvedDelayMs,
-      voteDelayMs: resolvedDelayMs,
-      loopDelayMs: resolvedDelayMs,
-      loopCount: loopCountSafe,
+      loopDelayMs,
+      loopCount,
       total,
       source,
       kickQueueId,
-      mode: "anti-stall-direct-dispatch-v2",
-      note: "Tidak menunggu room.kick.result, room.kick.queued, atau job.get sebelum vote berikutnya. Delay hanya mengatur jarak pengiriman."
+      mode: "sequential-voter-and-target-waves"
     });
 
+    const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+    async function waitForActionProgress(actionNo, timeoutMs = 10000) {
+      const startedAt = Date.now();
+      while (Date.now() - startedAt < timeoutMs) {
+        for (const a of accounts) {
+          if (a.completedKickActions.has(actionNo)) return "terminal";
+          if (a.acknowledgedKickActions.has(actionNo)) return "acknowledged";
+        }
+        await sleep(100);
+      }
+      return "timeout";
+    }
+
     try {
-      for (let loop = 1; loop <= loopCountSafe; loop++) {
+      for (let loop = 1; loop <= loopCount; loop++) {
         for (let targetIndex = 0; targetIndex < uniqueTargets.length; targetIndex++) {
           const target = uniqueTargets[targetIndex];
           const eligible = accounts.map((a, index) => ({a, index}))
@@ -1343,9 +1313,21 @@ wss.on("connection", dashboard => {
             target,
             eligibleAccounts: eligible.map(index => index + 1),
             eligibleCount: eligible.length,
-            mode: "anti-stall-direct-dispatch-v2"
+            mode: "sequential-voter-and-target-waves"
           });
 
+          if (!eligible.length) {
+            skipped += voterCount;
+            continue;
+          }
+
+          // V5 reliability fix: process ONE voter job at a time, globally.
+          // The API's room.kick command is asynchronous and returns a job_id.
+          // Sending ten vote jobs at once can make it impossible to distinguish
+          // queue acceptance from the actual vote result. A voter must finish
+          // (terminal job state) before the next voter is dispatched. After all
+          // voters for target A finish, target B starts. This is intentionally
+          // slower, but removes concurrency as a source of missed targets.
           for (const accountIndex of eligible) {
             actionNo++;
             const currentAction = actionNo;
@@ -1359,21 +1341,11 @@ wss.on("connection", dashboard => {
               targetIndex: targetIndex + 1,
               actionNo: currentAction
             });
-
-            if (didSend) {
-              sent++;
-              safeSend(dashboardClient, {
-                type: "log",
-                index: accountIndex,
-                message: `KICK direct-send: target=${target}; voter #${accountIndex + 1}; action=${currentAction}`
-              });
-            } else {
-              skipped++;
-            }
+            if (didSend) sent++;
+            else skipped++;
 
             safeSend(dashboardClient, {
               type: "kickQueue.step",
-              runId: kickQueueId,
               loop,
               targetIndex: targetIndex + 1,
               target,
@@ -1382,22 +1354,34 @@ wss.on("connection", dashboard => {
               total,
               sent,
               skipped,
-              done: currentAction,
               status: didSend ? "sent" : "skipped",
-              mode: "anti-stall-direct-dispatch-v2"
+              mode: "sequential-voter-and-target-waves"
             });
 
-            // ANTI-MACET CORE: this is the only optional wait. It is a local
-            // send-rate delay controlled by the frontend. Never inspect or
-            // await room.kick.result / .queued / job.get here.
-            if (didSend && resolvedDelayMs > 0) await sleep(resolvedDelayMs);
+            if (didSend) {
+              const progress = await waitForActionProgress(currentAction, 10000);
+              if (progress === "terminal") {
+                completed = Math.min(total, completed + 1);
+              } else if (progress === "acknowledged") {
+                safeSend(dashboardClient, {
+                  type: "log",
+                  index: accountIndex,
+                  message: `KICK target ${target}: room.kick.result diterima dari voter #${accountIndex + 1}; lanjut voter berikutnya, job.get tetap menjadi verifikasi akhir.`
+                });
+              } else {
+                safeSend(dashboardClient, {
+                  type: "log",
+                  index: accountIndex,
+                  message: `KICK target ${target}: tidak menerima room.kick.result maupun status terminal dalam 10 detik; voter berikutnya tetap dilanjutkan.`
+                });
+              }
+            }
           }
 
           safeSend(dashboardClient, {
             type: "kickQueue.progress",
-            runId: kickQueueId,
             done: Math.min(total, actionNo),
-            completed: sent,
+            completed,
             total,
             sent,
             skipped,
@@ -1405,38 +1389,30 @@ wss.on("connection", dashboard => {
             targetIndex: targetIndex + 1,
             target,
             source,
-            mode: "anti-stall-direct-dispatch-v2"
+            mode: "sequential-voter-and-target-waves"
           });
         }
+
+        if (loop < loopCount && loopDelayMs > 0) await sleep(loopDelayMs);
       }
     } catch (err) {
-      safeSend(dashboardClient, {
-        type: "kickQueue.error",
-        runId: kickQueueId,
-        total,
-        done: actionNo,
-        sent,
-        skipped,
-        source,
-        message: err?.message || String(err)
-      });
-      activeKickRun = null;
+      commandQueueRunning = false;
+      safeSend(dashboardClient, {type: "kickQueue.error", total, done: actionNo, sent, skipped, source, message: err?.message || String(err)});
       return {started: true, sent, skipped, total, error: err?.message || String(err)};
     }
 
-    activeKickRun = null;
+    commandQueueRunning = false;
     safeSend(dashboardClient, {
       type: "kickQueue.done",
-      runId: kickQueueId,
       total,
       done: actionNo,
-      completed: sent,
+      completed,
       sent,
       skipped,
       source,
-      mode: "anti-stall-direct-dispatch-v2",
+      mode: "sequential-voter-and-target-waves",
       dispatched: true,
-      note: "Semua vote telah didispatch tanpa menunggu hasil vote/job. room.kick.result dan job.get tetap diproses async jika upstream mengirimkannya."
+      note: "Setiap voter diproses satu per satu; target berikutnya baru dimulai setelah seluruh voter target sebelumnya selesai atau timeout."
     });
     return {started: true, sent, skipped, total};
   }
@@ -1764,22 +1740,10 @@ wss.on("connection", dashboard => {
       const targets = Array.isArray(msg.targets)
         ? [...new Set(msg.targets.map(v => String(v || "").trim()).filter(Boolean))].slice(0, 10)
         : [];
-      const delayMs = clampDelayMs(
-        msg.delayMs ?? msg.voteDelayMs ?? msg.socketDelayMs ?? msg.loopDelayMs ?? 0
-      );
+      const delayMs = clampDelayMs(msg.delayMs);
       const loopCount = Math.max(1, Math.min(100, Number(msg.loopCount) || 1));
-      const targetDelaysMs = Array.isArray(msg.targetDelaysMs)
-        ? msg.targetDelaysMs.slice(0, targets.length).map(value => clampDelayMs(value))
-        : [];
       if (!room || !targets.length) return;
-      runKickQueue(room, targets, delayMs, loopCount, "kickAll", {
-        delayMs,
-        voteDelayMs: msg.voteDelayMs,
-        socketDelayMs: msg.socketDelayMs,
-        loopDelayMs: msg.loopDelayMs,
-        targetDelaysMs,
-        sequentialMode: msg.sequentialMode === true
-      });
+      runKickQueue(room, targets, delayMs, loopCount, "kickAll");
       return;
     }
 
@@ -1794,25 +1758,67 @@ wss.on("connection", dashboard => {
 });
 
 
-
-httpServer.listen(PORT, "0.0.0.0", () => {
-  console.log(`MigMaster persistent Node.js backend listening on 0.0.0.0:${PORT}`);
-  console.log(`Dashboard WebSocket: /ws`);
-  console.log(`Upstream Mig33 WebSocket: ${MIG_WS_URL}`);
-});
-
-function shutdown(signal) {
-  console.log(`${signal} received; shutting down`);
-  for (const client of wss.clients) {
-    try { client.close(1001, "server shutdown"); } catch {}
+export class MigMasterSession extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+    this.env = env;
   }
-  for (let i = 0; i < accounts.length; i++) {
-    try { closeAccount(i, true); } catch {}
+
+  async fetch(request) {
+    const url = new URL(request.url);
+    if (url.pathname !== "/ws") {
+      return jsonResponse({
+        ok: true,
+        service: "migmaster-backend",
+        websocket: "/ws",
+        mig33Endpoint: MIG_WS_URL,
+        backendVersion: "persistent-account-sockets-kickall-v5-cloudflare-2026-09-07-kickresult-joinfixed-ackorder"
+      });
+    }
+
+    if (request.headers.get("Upgrade") !== "websocket") {
+      return new Response("Expected WebSocket", { status: 426 });
+    }
+
+    DASHBOARD_TOKEN = this.env?.DASHBOARD_TOKEN || "";
+    MIG_WS_URL = this.env?.MIG_WS_URL || DEFAULT_MIG_WS_URL;
+    if (DASHBOARD_TOKEN && url.searchParams.get("token") !== DASHBOARD_TOKEN) {
+      return new Response("Unauthorized", { status: 401 });
+    }
+
+    const pair = new WebSocketPair();
+    const client = pair[0];
+    const server = pair[1];
+    server.accept();
+    const dashboard = new CFWebSocket(server);
+    wss.emitConnection(dashboard);
+    return new Response(null, { status: 101, webSocket: client });
   }
-  httpServer.close(() => process.exit(0));
-  setTimeout(() => process.exit(0), 8000).unref();
 }
 
-process.on("SIGTERM", () => shutdown("SIGTERM"));
-process.on("SIGINT", () => shutdown("SIGINT"));
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    if (url.pathname === "/health") {
+      return jsonResponse({
+        ok: true,
+        service: "migmaster-backend",
+        websocket: "/ws",
+        mig33Endpoint: env?.MIG_WS_URL || DEFAULT_MIG_WS_URL,
+        backendVersion: "persistent-account-sockets-kickall-v5-cloudflare-2026-09-07-kickresult-joinfixed-ackorder"
+      });
+    }
 
+    if (url.pathname !== "/ws") {
+      return jsonResponse({
+        ok: true,
+        service: "migmaster-backend",
+        websocket: "/ws",
+        backendVersion: "persistent-account-sockets-kickall-v5-cloudflare-2026-09-07-kickresult-joinfixed-ackorder"
+      });
+    }
+
+    const id = env.MIGMASTER_SESSION.idFromName("migmaster-main");
+    return env.MIGMASTER_SESSION.get(id).fetch(request);
+  }
+};
