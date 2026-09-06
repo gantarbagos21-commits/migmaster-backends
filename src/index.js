@@ -1602,6 +1602,7 @@ wss.on("connection", dashboard => {
 export class MigMasterSession extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
+    this.env = env;
   }
 
   async fetch(request) {
@@ -1620,8 +1621,8 @@ export class MigMasterSession extends DurableObject {
       return new Response("Expected WebSocket", { status: 426 });
     }
 
-    DASHBOARD_TOKEN = env?.DASHBOARD_TOKEN || "";
-    MIG_WS_URL = env?.MIG_WS_URL || DEFAULT_MIG_WS_URL;
+    DASHBOARD_TOKEN = this.env?.DASHBOARD_TOKEN || "";
+MIG_WS_URL = this.env?.MIG_WS_URL || DEFAULT_MIG_WS_URL;
     if (DASHBOARD_TOKEN && url.searchParams.get("token") !== DASHBOARD_TOKEN) {
       return new Response("Unauthorized", { status: 401 });
     }
