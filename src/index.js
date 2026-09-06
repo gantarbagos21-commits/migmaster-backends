@@ -1218,10 +1218,6 @@ wss.on("connection", dashboard => {
 
   async function runKickQueue(room, targets, delayMs, loopCount, source = "kickAll") {
     if (!room || !targets.length) return {started: false, sent: 0, skipped: 0, total: 0};
-    if (commandQueueRunning) {
-      safeSend(dashboardClient, {type: "error", index: 0, message: "Kick All masih berjalan. Tunggu sampai selesai sebelum menjalankan lagi."});
-      return {started: false, sent: 0, skipped: 0, total: 0};
-    }
 
     const loopDelayMs = clampDelayMs(delayMs);
     const kickQueueId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -1245,7 +1241,7 @@ wss.on("connection", dashboard => {
       loopCount,
       source,
       kickQueueId,
-      mode: "sequential-voter-and-target-waves"
+      mode: "direct-dispatch-no-result-queue"
     });
 
     if (!voterCount) {
@@ -1261,15 +1257,16 @@ wss.on("connection", dashboard => {
       return {started: false, sent: 0, skipped: uniqueTargets.length, total: 0};
     }
 
-    commandQueueRunning = true;
     accounts.forEach(a => {
       a.completedKickActions.clear();
       a.acknowledgedKickActions.clear();
     });
+
     let actionNo = 0;
     let sent = 0;
     let skipped = 0;
     let completed = 0;
+    const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
     safeSend(dashboardClient, {
       type: "kickQueue.start",
@@ -1280,22 +1277,9 @@ wss.on("connection", dashboard => {
       total,
       source,
       kickQueueId,
-      mode: "sequential-voter-and-target-waves"
+      mode: "direct-dispatch-no-result-queue",
+      note: "Tidak menunggu room.kick.result atau job.get untuk mengirim vote berikutnya. Delay dikendalikan dari frontend."
     });
-
-    const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-
-    async function waitForActionProgress(actionNo, timeoutMs = 10000) {
-      const startedAt = Date.now();
-      while (Date.now() - startedAt < timeoutMs) {
-        for (const a of accounts) {
-          if (a.completedKickActions.has(actionNo)) return "terminal";
-          if (a.acknowledgedKickActions.has(actionNo)) return "acknowledged";
-        }
-        await sleep(100);
-      }
-      return "timeout";
-    }
 
     try {
       for (let loop = 1; loop <= loopCount; loop++) {
@@ -1313,21 +1297,9 @@ wss.on("connection", dashboard => {
             target,
             eligibleAccounts: eligible.map(index => index + 1),
             eligibleCount: eligible.length,
-            mode: "sequential-voter-and-target-waves"
+            mode: "direct-dispatch-no-result-queue"
           });
 
-          if (!eligible.length) {
-            skipped += voterCount;
-            continue;
-          }
-
-          // V5 reliability fix: process ONE voter job at a time, globally.
-          // The API's room.kick command is asynchronous and returns a job_id.
-          // Sending ten vote jobs at once can make it impossible to distinguish
-          // queue acceptance from the actual vote result. A voter must finish
-          // (terminal job state) before the next voter is dispatched. After all
-          // voters for target A finish, target B starts. This is intentionally
-          // slower, but removes concurrency as a source of missed targets.
           for (const accountIndex of eligible) {
             actionNo++;
             const currentAction = actionNo;
@@ -1341,8 +1313,17 @@ wss.on("connection", dashboard => {
               targetIndex: targetIndex + 1,
               actionNo: currentAction
             });
-            if (didSend) sent++;
-            else skipped++;
+
+            if (didSend) {
+              sent++;
+              safeSend(dashboardClient, {
+                type: "log",
+                index: accountIndex,
+                message: `KICK dikirim langsung: target=${target}; voter #${accountIndex + 1}; action=${currentAction}`
+              });
+            } else {
+              skipped++;
+            }
 
             safeSend(dashboardClient, {
               type: "kickQueue.step",
@@ -1355,29 +1336,15 @@ wss.on("connection", dashboard => {
               sent,
               skipped,
               status: didSend ? "sent" : "skipped",
-              mode: "sequential-voter-and-target-waves"
+              mode: "direct-dispatch-no-result-queue"
             });
 
-            if (didSend) {
-              const progress = await waitForActionProgress(currentAction, 10000);
-              if (progress === "terminal") {
-                completed = Math.min(total, completed + 1);
-              } else if (progress === "acknowledged") {
-                safeSend(dashboardClient, {
-                  type: "log",
-                  index: accountIndex,
-                  message: `KICK target ${target}: room.kick.result diterima dari voter #${accountIndex + 1}; lanjut voter berikutnya, job.get tetap menjadi verifikasi akhir.`
-                });
-              } else {
-                safeSend(dashboardClient, {
-                  type: "log",
-                  index: accountIndex,
-                  message: `KICK target ${target}: tidak menerima room.kick.result maupun status terminal dalam 10 detik; voter berikutnya tetap dilanjutkan.`
-                });
-              }
-            }
+            // This is only a send-rate delay. We do NOT wait for room.kick.result
+            // or job.get before dispatching the next vote.
+            if (didSend && loopDelayMs > 0) await sleep(loopDelayMs);
           }
 
+          completed = sent;
           safeSend(dashboardClient, {
             type: "kickQueue.progress",
             done: Math.min(total, actionNo),
@@ -1389,19 +1356,15 @@ wss.on("connection", dashboard => {
             targetIndex: targetIndex + 1,
             target,
             source,
-            mode: "sequential-voter-and-target-waves"
+            mode: "direct-dispatch-no-result-queue"
           });
         }
-
-        if (loop < loopCount && loopDelayMs > 0) await sleep(loopDelayMs);
       }
     } catch (err) {
-      commandQueueRunning = false;
       safeSend(dashboardClient, {type: "kickQueue.error", total, done: actionNo, sent, skipped, source, message: err?.message || String(err)});
       return {started: true, sent, skipped, total, error: err?.message || String(err)};
     }
 
-    commandQueueRunning = false;
     safeSend(dashboardClient, {
       type: "kickQueue.done",
       total,
@@ -1410,9 +1373,9 @@ wss.on("connection", dashboard => {
       sent,
       skipped,
       source,
-      mode: "sequential-voter-and-target-waves",
+      mode: "direct-dispatch-no-result-queue",
       dispatched: true,
-      note: "Setiap voter diproses satu per satu; target berikutnya baru dimulai setelah seluruh voter target sebelumnya selesai atau timeout."
+      note: "Semua vote dikirim tanpa menunggu hasil vote/job. room.kick.result dan job.get tetap dicatat sebagai hasil async bila diterima."
     });
     return {started: true, sent, skipped, total};
   }
@@ -1698,7 +1661,9 @@ wss.on("connection", dashboard => {
         : [];
       autoKick.loopCount = Math.max(1, Math.min(100, Number(msg.loopCount) || 1));
       autoKick.socketDelayMs = Math.max(0, Math.min(60000, Number(msg.socketDelayMs) || 0));
-      autoKick.delayMs = clampDelayMs(msg.delayMs);
+      autoKick.delayMs = clampDelayMs(
+        msg.delayMs ?? msg.voteDelayMs ?? msg.socketDelayMs ?? 0
+      );
       autoKick.sequentialMode = msg.sequentialMode === true;
       if (!autoKick.enabled) stopAutoKickCountdown("disabled");
       else autoKickState(autoKick.countdownEndAt ? "countdown" : "armed");
@@ -1740,7 +1705,11 @@ wss.on("connection", dashboard => {
       const targets = Array.isArray(msg.targets)
         ? [...new Set(msg.targets.map(v => String(v || "").trim()).filter(Boolean))].slice(0, 10)
         : [];
-      const delayMs = clampDelayMs(msg.delayMs);
+      // Frontend owns the kick timing. Accept delayMs directly and the
+      // frontend aliases voteDelayMs/socketDelayMs for compatibility.
+      const delayMs = clampDelayMs(
+        msg.delayMs ?? msg.voteDelayMs ?? msg.socketDelayMs ?? 0
+      );
       const loopCount = Math.max(1, Math.min(100, Number(msg.loopCount) || 1));
       if (!room || !targets.length) return;
       runKickQueue(room, targets, delayMs, loopCount, "kickAll");
