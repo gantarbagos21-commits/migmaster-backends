@@ -503,10 +503,14 @@ function connectDashboard(){
  };
  ui.onmessage=e=>{
   let d;try{d=JSON.parse(e.data)}catch{return}
-  if(d.type==="dashboard.ready"){ return; }
+  if(d.type==="dashboard.ready"){ log(`Backend ativo: ${d.backendVersion||"versão não informada"}`); return; }
   if(d.type==="status"){
    const knownStatus=["online","error","offline","auth","connecting","wait","joining"];
-   const status=knownStatus.includes(String(d.status))?String(d.status):"offline";
+   const incoming=knownStatus.includes(String(d.status))?String(d.status):"offline";
+   const current=accounts[d.index]?.status||"offline";
+   // session.ready is authoritative. Once ONLINE, room/join/auth noise must not
+   // downgrade the account back to AUTH; only explicit ERROR/OFFLINE may do so.
+   const status=(current==="online" && !["error","offline","online"].includes(incoming))?"online":incoming;
    const cls=status==="online"?"online":status==="error"?"error":status==="offline"?"offline":"wait";
    accounts[d.index].status=status;
    if(d.balance){accounts[d.index].balance=d.balance;$(`b${d.index}`).textContent=d.balance}
