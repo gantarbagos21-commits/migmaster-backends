@@ -1,32 +1,21 @@
-# MigMaster Cloudflare Backend
-Cloudflare deployment sync
-Cloudflare deployment sync 2026-09-07
-Backend WebSocket bridge for the MigReborn Developer API, packaged for Cloudflare Workers + Durable Objects.
+# MigMaster Cloudflare V5 — Kick Result Fix
 
-## Deploy from Cloudflare Dashboard
+Versi ini mempertahankan queue V5 satu-voter-per-satu-target, tetapi memperbaiki penantian `room.kick`:
+
+- `room.kick.result` dipakai sebagai **acknowledgement langsung** agar queue tidak menunggu 70 detik.
+- `job.get` / status job tetap dipakai sebagai **verifikasi akhir** dan tidak dianggap berhasil hanya karena `queued` atau `room.kick.result`.
+- Jika `room.kick.result` tidak datang dalam 10 detik dan status job juga belum terminal, voter berikutnya tetap dilanjutkan.
+- Setiap target tetap diproses berdasarkan voter yang online, sudah join room, dan memiliki `rooms.kick`.
+- Perbaikan Cloudflare Durable Object: environment disimpan pada `this.env`, sehingga tidak lagi mereferensikan `env` yang tidak terdefinisi di `fetch(request)`.
+
+Backend version: `persistent-account-sockets-kickall-v5-cloudflare-2026-09-07-kickresult-joinfixed`
+
+Deploy command:
+`npx wrangler deploy --config ./wrangler.json`
 
 
-1. Create a Cloudflare account and open **Workers & Pages**.
-2. Create a Worker project and connect this GitHub repository, or upload this project through your normal Git workflow.
-3. Build/deploy command: `npx wrangler deploy`.
-4. The Worker exposes:
-   - `GET /health`
-   - `wss://YOUR-WORKER.workers.dev/ws`
-5. Optional secret: `DASHBOARD_TOKEN`.
+## FINAL merged build
 
-## Deploy with Wrangler
+Backend version: `persistent-account-sockets-kickall-v5-cloudflare-2026-09-07-kickresult-joinfixed`
 
-```bash
-npm install
-npx wrangler login
-npx wrangler deploy
-```
-
-Cloudflare Durable Objects are used for the dashboard WebSocket session. The Worker opens separate upstream WebSockets for the configured accounts and forwards API events to the dashboard.
-
-## Important
-
-- Do not put Mig33 usernames/passwords into this repository.
-- Credentials are supplied at runtime by the dashboard and kept in the active session only.
-- The upstream endpoint defaults to `wss://developer.mig33.id/developer/ws`.
-- Cloudflare's WebSocket/Durable Objects runtime has platform limits; for long-lived outbound WebSockets the Durable Object may need to reconnect.
+This build combines the Join Room fix and the Kick Result acknowledgement fix. `room.kick.result` is treated as immediate acknowledgement so the queue can proceed without waiting 70 seconds, while `job.get` remains the final verification. Join All includes explicit dashboard acknowledgements and per-account logs.
