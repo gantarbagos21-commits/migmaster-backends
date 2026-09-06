@@ -215,7 +215,7 @@ function stopAutoKickTicker(){
  if(autoKickTimerTicker){clearInterval(autoKickTimerTicker);autoKickTimerTicker=null;}
 }
 let kickProgress={done:0,total:0,running:false};
-function renderKickProgress(){const pct=kickProgress.total?Math.min(100,Math.round(kickProgress.done/kickProgress.total*100)):0;$("kickProgressFill").style.width=pct+"%";$("kickProgressText").textContent=pct+"%";$("kickProgressLabel").textContent=kickProgress.running?"Kick All sedang berjalan":"Progres Kick All";$("kickProgressNote").textContent=kickProgress.running?`${kickProgress.done}/${kickProgress.total} target diproses...`:kickProgress.total?`Selesai: ${kickProgress.done}/${kickProgress.total} target.`:"Belum ada proses kick.";}
+function renderKickProgress(){const pct=kickProgress.total?Math.min(100,Math.round(kickProgress.done/kickProgress.total*100)):0;$("kickProgressFill").style.width=pct+"%";$("kickProgressText").textContent=pct+"%";$("kickProgressLabel").textContent=kickProgress.running?"Kick All sedang berjalan":"Progres Kick All";$("kickProgressNote").textContent=kickProgress.running?`${kickProgress.done}/${kickProgress.total} vote diproses...`:kickProgress.total?`Selesai: ${kickProgress.done}/${kickProgress.total} vote.`:"Belum ada proses kick.";}
 
 function formatMs(value){
  const ms=Math.max(0,Math.floor(Number(value)||0));
@@ -691,7 +691,7 @@ async function runKickQueue(){
   $('kickAll').textContent='Menjalankan Kick All...';
   kickProgress={done:0,total:targets.length*10*loopCount,running:true};
   renderKickProgress();
-   if(!send({action:'kickQueue',room,targets,loopCount,delayMs:Math.max(0,Math.min(600000,Number($('loopDelayMs').value)||0))})){
+   if(!send({action:'kickQueue',room,targets,loopCount,delayMs:Math.max(0,Math.min(60000,Number($('loopDelayMs').value)||0))})){
     $('kickAll').disabled=false;
      $('kickAll').textContent='Kick All';
     kickProgress.running=false;
