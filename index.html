@@ -191,7 +191,7 @@ pre.log{height:220px;overflow:auto;background:#020617;border-radius:12px;padding
 const $=id=>document.getElementById(id);
 const accounts=Array.from({length:10},()=>({username:"",password:"",status:"offline",balance:"-"}));
 let ui=null;
-let backendRetryTimer=null, backendRetryDelay=1000, backendConnected=false, logoutResetTimer=null;
+let backendRetryTimer=null, backendRetryDelay=1000, backendConnected=false;
 let participantUsers=[];
 let autoKickRemainingMs=null;
 let autoKickDeadlineAt=0;
@@ -505,10 +505,12 @@ function connectDashboard(){
   let d;try{d=JSON.parse(e.data)}catch{return}
   if(d.type==="dashboard.ready"){ return; }
   if(d.type==="status"){
-   const cls=d.status==="online"?"online":d.status==="error"?"error":d.status==="offline"?"offline":"wait";
-   accounts[d.index].status=d.status;
+   const knownStatus=["online","error","offline","auth","connecting","wait","joining"];
+   const status=knownStatus.includes(String(d.status))?String(d.status):"offline";
+   const cls=status==="online"?"online":status==="error"?"error":status==="offline"?"offline":"wait";
+   accounts[d.index].status=status;
    if(d.balance){accounts[d.index].balance=d.balance;$(`b${d.index}`).textContent=d.balance}
-   setStatus(d.index,d.status+(d.message?": "+d.message:""),cls);
+   setStatus(d.index,status+(d.message?": "+d.message:""),cls);
    render();
    return;
   }
@@ -543,7 +545,6 @@ function connectDashboard(){
   if(d.type==="kick.done" || d.type==="kickQueue.done"){kickProgress.done=Math.min(Number(d.total??kickProgress.total),Number(d.done??d.total??kickProgress.total));kickProgress.total=Number(d.total??kickProgress.total);kickProgress.running=false;renderKickProgress();$("kickAll").disabled=false;$("kickAll").textContent="Kick All";return;}
   if(d.type==="autoKick.triggered"){ return; }
   if(d.type==="logout.done"){
-    if(logoutResetTimer){clearTimeout(logoutResetTimer);logoutResetTimer=null;}
     accounts.forEach((account,index)=>{
       account.status="offline"; account.balance="-";
       setStatus(index,"Offline","offline"); $(`b${index}`).textContent="-";
@@ -691,25 +692,22 @@ $('leaveAll').onclick=()=>send({action:'leaveAll',room:$('room').value.trim()});
 $('balanceAll').onclick=()=>send({action:'balanceAll'});
  $('disconnectAll').onclick=()=>{
   const btn=$('disconnectAll');
-  if(!btn || btn.dataset.busy==='1')return;
-  btn.dataset.busy='1';
+  if(!btn)return;
 
-  // Reset UI IMMEDIATELY. Do not wait for the backend/socket ACK.
+  // UI logout is local and immediate. It never waits for a backend response.
   accounts.forEach((account,index)=>{
     account.status='offline';
     account.balance='-';
-    account.authTimer=null;
     setStatus(index,'Offline','offline');
     if($('b'+index))$('b'+index).textContent='-';
   });
   render();
   btn.disabled=false;
   btn.textContent='Logout';
-  log('Logout dimulai — UI langsung kembali STANDBY.');
+  log('Logout: UI dikembalikan ke STANDBY.');
 
-  // Send cleanup in the background; UI never depends on this response.
+  // Backend cleanup is best-effort only.
   try { send({action:'logoutAll'}); } catch(e) { log('Logout backend: '+e.message); }
-  setTimeout(()=>{ btn.dataset.busy='0'; },250);
  };
 $('messageAll').onclick=()=>{
  const room=$('room').value.trim(),message=$('message').value;
