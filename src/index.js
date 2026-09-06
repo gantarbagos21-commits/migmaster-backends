@@ -372,7 +372,7 @@ const autoKick = {
 wss.on("connection", dashboard => {
   dashboardClient = dashboard;
 
-  safeSend(dashboardClient, {type: "dashboard.ready", accounts: 10, backendVersion: "persistent-account-sockets-kickall-v5-cloudflare-2026-09-07-kickresult-joinfixed"});
+  safeSend(dashboardClient, {type: "dashboard.ready", accounts: 10, backendVersion: "persistent-account-sockets-kickall-v5-cloudflare-2026-09-07-kickresult-joinfixed-ackorder"});
 
   function dashboardStatus(i, status, extra = {}) {
     safeSend(dashboardClient, {type: "status", index: i, status, ...extra});
@@ -663,11 +663,28 @@ wss.on("connection", dashboard => {
 
     const jobId = queuedJobId(data);
     let matchedJobId = jobId && a.pendingJobs.has(jobId) ? jobId : "";
+    let matchedPendingKick = null;
+
+    // Some live sessions emit room.kick.result before room.kick.queued. In that
+    // order there is no pendingJobs entry yet, but sendKickToAccount has already
+    // recorded the exact outbound action in pendingKickDispatches. Match that
+    // first so the acknowledgement is never lost just because event ordering
+    // differs.
+    const room = String(payload?.room || payload?.room_name || data?.room || "").trim();
+    const target = String(
+      payload?.target_username || payload?.target || data?.target_username || data?.target || ""
+    ).trim();
+
     if (!matchedJobId) {
-      const room = String(payload?.room || payload?.room_name || data?.room || "").trim();
-      const target = String(
-        payload?.target_username || payload?.target || data?.target_username || data?.target || ""
-      ).trim();
+      for (const pending of a.pendingKickDispatches) {
+        if (room && pending.room && !roomMatches(room, pending.room)) continue;
+        if (target && pending.target && target !== pending.target) continue;
+        matchedPendingKick = pending;
+        break;
+      }
+    }
+
+    if (!matchedJobId && !matchedPendingKick) {
       for (const [pendingId, job] of a.pendingJobs.entries()) {
         if (job.command !== "room.kick") continue;
         if (room && job.room && !roomMatches(room, job.room)) continue;
@@ -676,10 +693,11 @@ wss.on("connection", dashboard => {
         break;
       }
     }
-    if (!matchedJobId) return false;
 
-    const job = a.pendingJobs.get(matchedJobId);
-    if (!job || job.command !== "room.kick") return false;
+    if (!matchedJobId && !matchedPendingKick) return false;
+
+    const job = matchedJobId ? a.pendingJobs.get(matchedJobId) : matchedPendingKick;
+    if (!job) return false;
     const actionNo = Number(job.actionNo || 0);
     if (Number.isFinite(actionNo) && actionNo > 0) {
       a.acknowledgedKickActions.add(actionNo);
@@ -687,7 +705,7 @@ wss.on("connection", dashboard => {
     safeSend(dashboardClient, {
       type: "log",
       index: i,
-      message: `API room.kick.result diterima${job.target ? `: ${job.target}` : ""}; job ${matchedJobId} tetap diverifikasi via job.get.`
+      message: `API room.kick.result diterima${job.target ? `: ${job.target}` : ""}${matchedJobId ? `; job ${matchedJobId}` : "; job belum diterima (event queued belum masuk)"} tetap diverifikasi via job.get.`
     });
     return true;
   }
@@ -1754,7 +1772,7 @@ export class MigMasterSession extends DurableObject {
         service: "migmaster-backend",
         websocket: "/ws",
         mig33Endpoint: MIG_WS_URL,
-        backendVersion: "persistent-account-sockets-kickall-v5-cloudflare-2026-09-07-kickresult-joinfixed"
+        backendVersion: "persistent-account-sockets-kickall-v5-cloudflare-2026-09-07-kickresult-joinfixed-ackorder"
       });
     }
 
@@ -1787,7 +1805,7 @@ export default {
         service: "migmaster-backend",
         websocket: "/ws",
         mig33Endpoint: env?.MIG_WS_URL || DEFAULT_MIG_WS_URL,
-        backendVersion: "persistent-account-sockets-kickall-v5-cloudflare-2026-09-07-kickresult-joinfixed"
+        backendVersion: "persistent-account-sockets-kickall-v5-cloudflare-2026-09-07-kickresult-joinfixed-ackorder"
       });
     }
 
@@ -1796,7 +1814,7 @@ export default {
         ok: true,
         service: "migmaster-backend",
         websocket: "/ws",
-        backendVersion: "persistent-account-sockets-kickall-v5-cloudflare-2026-09-07-kickresult-joinfixed"
+        backendVersion: "persistent-account-sockets-kickall-v5-cloudflare-2026-09-07-kickresult-joinfixed-ackorder"
       });
     }
 
