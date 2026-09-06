@@ -1,6 +1,6 @@
 {
   "name": "migmaster-cloudflare-v5",
-  "version": "5.0.0-cloudflare",
+  "version": "5.0.2-cloudflare-final-v2-anti-stall-vote",
   "private": true,
   "type": "module",
   "scripts": {
