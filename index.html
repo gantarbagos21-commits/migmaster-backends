@@ -561,6 +561,11 @@ function connectDashboard(){
    renderKickProgress();
    return;
   }
+  if(d.type==="kick.result"){
+    const label=d.success?"SUKSES":"GAGAL";
+    log(`#${Number(d.index)+1} KICK ${label}: ${d.target||"-"} (${d.status||"-"})${d.error?" — "+d.error:""}`);
+    return;
+  }
   if(d.type==="kickQueue.error"){kickProgress.done=Number(d.done??kickProgress.done);kickProgress.total=Number(d.total??kickProgress.total);kickProgress.running=false;renderKickProgress();log(`Kick All ERROR: ${d.message||"error tidak diketahui"}`);$("kickAll").disabled=false;$("kickAll").textContent="Kick All";return;}
   if(d.type==="kick.done" || d.type==="kickQueue.done"){kickProgress.done=Math.min(Number(d.total??kickProgress.total),Number(d.done??d.total??kickProgress.total));kickProgress.total=Number(d.total??kickProgress.total);kickProgress.running=false;renderKickProgress();$("kickAll").disabled=false;$("kickAll").textContent="Kick All";return;}
   if(d.type==="autoKick.triggered"){ return; }
