@@ -207,6 +207,7 @@ function syncAutoKickConfig(){
  if(!backendConnected)return;
  const thresholdMs=Math.max(0,Math.min(60000,Number($('autoKickThresholdMs').value)||0));
  const loopCount=Math.max(1,Math.min(100,Number($('kickLoops').value)||1));
+ kickProgress={done:0,total:targets.length*loopCount,running:true}; renderKickProgress();
  send({
    action:'autoKick.configure',
    enabled:$('autoKickEnabled').checked,
@@ -444,8 +445,16 @@ function connectDashboard(){
     return;
   }
   if(d.type==="autoKick.manual.started"){ return; }
-  if(d.type==="kick.progress" || d.type==="kickQueue.progress"){kickProgress.done=Number(d.done??d.completed??d.current??0);kickProgress.total=Number(d.total??d.count??kickProgress.total);kickProgress.running=kickProgress.done<kickProgress.total;renderKickProgress();return;}
-  if(d.type==="kick.done" || d.type==="kickQueue.done"){kickProgress.done=kickProgress.total;kickProgress.running=false;renderKickProgress();$("kickAll").disabled=false;$("kickAll").textContent="Kick All";return;}
+  if(d.type==="kick.progress" || d.type==="kickQueue.progress" || d.type==="kickQueue.status"){
+ const p=d.progress||d.data||d;
+ const done=Number(p.done??p.completed??p.processed??p.current??p.finished??0);
+ const total=Number(p.total??p.count??p.totalTargets??kickProgress.total);
+ if(total>0)kickProgress.total=total;
+ kickProgress.done=Math.max(0,Math.min(kickProgress.total,done));
+ kickProgress.running=kickProgress.done<kickProgress.total;
+ renderKickProgress(); return;
+}
+  if(d.type==="kick.done" || d.type==="kickQueue.done" || d.type==="kickQueue.completed" || d.type==="kick.completed"){kickProgress.done=kickProgress.total;kickProgress.running=false;renderKickProgress();$("kickAll").disabled=false;$("kickAll").textContent="Kick All";return;}
   if(d.type==="autoKick.triggered"){ return; }
   if(d.type==="logout.done"){
     accounts.forEach((account,index)=>{
