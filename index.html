@@ -557,6 +557,10 @@ function connectDashboard(){
    renderKickProgress();
    return;
   }
+  if(d.type==="kick.queued"){
+    log(`#${Number(d.index)+1} KICK QUEUED: ${d.target||"-"} [job ${d.jobId||"-"}]`);
+    return;
+  }
   if(d.type==="kick.result"){
     const label=d.success?"SUKSES":"GAGAL";
     log(`#${Number(d.index)+1} KICK ${label}: ${d.target||"-"} (${d.status||"-"})${d.error?" — "+d.error:""}`);
