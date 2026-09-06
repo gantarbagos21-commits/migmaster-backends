@@ -189,7 +189,7 @@ pre.log{height:220px;overflow:auto;background:#020617;border-radius:12px;padding
 
 <script>
 const $=id=>document.getElementById(id);
-const accounts=Array.from({length:10},()=>({username:"",password:"",status:"offline",balance:"-"}));
+const accounts=Array.from({length:10},()=>({username:"",password:"",status:"offline",balance:"-",joinedRooms:[],requestedRooms:[]}));
 let ui=null;
 let backendRetryTimer=null, backendRetryDelay=1000, backendConnected=false;
 let participantUsers=[];
@@ -214,8 +214,18 @@ function startAutoKickTicker(){
 function stopAutoKickTicker(){
  if(autoKickTimerTicker){clearInterval(autoKickTimerTicker);autoKickTimerTicker=null;}
 }
-let kickProgress={done:0,total:0,running:false};
-function renderKickProgress(){const pct=kickProgress.total?Math.min(100,Math.round(kickProgress.done/kickProgress.total*100)):0;$("kickProgressFill").style.width=pct+"%";$("kickProgressText").textContent=pct+"%";$("kickProgressLabel").textContent=kickProgress.running?"Kick All sedang berjalan":"Progres Kick All";$("kickProgressNote").textContent=kickProgress.running?`${kickProgress.done}/${kickProgress.total} vote diproses...`:kickProgress.total?`Selesai: ${kickProgress.done}/${kickProgress.total} vote.`:"Belum ada proses kick.";}
+let kickProgress={done:0,total:0,running:false,terminal:0,success:0,failed:0,queued:0};
+function renderKickProgress(){
+ const pct=kickProgress.total?Math.min(100,Math.round(kickProgress.done/kickProgress.total*100)):0;
+ $("kickProgressFill").style.width=pct+"%";
+ $("kickProgressText").textContent=pct+"%";
+ $("kickProgressLabel").textContent=kickProgress.running?"Kick All sedang berjalan":"Progres Kick All";
+ $("kickProgressNote").textContent=kickProgress.running
+   ? `${kickProgress.done}/${kickProgress.total} vote dikirim · hasil final ${kickProgress.terminal} (sukses ${kickProgress.success}, gagal ${kickProgress.failed})`
+   : kickProgress.total
+     ? `Dispatch selesai: ${kickProgress.done}/${kickProgress.total} · hasil final ${kickProgress.terminal} (sukses ${kickProgress.success}, gagal ${kickProgress.failed}).`
+     : "Belum ada proses kick.";
+}
 
 function formatMs(value){
  const ms=Math.max(0,Math.floor(Number(value)||0));
@@ -573,9 +583,23 @@ function connectDashboard(){
   }
   if(d.type==="autoKick.state"){ renderAutoKickState(d); return; }
   if(d.type==="autoKick.manual.started"){ return; }
+  if(d.type==="kickQueue.preflight"){
+   const voters=Array.isArray(d.voters)?d.voters:[];
+   log(`Kick All preflight: ${voters.length} ID memenuhi syarat sebagai voter di room ${d.room||"-"}: ${voters.length?voters.map(n=>"#"+n).join(", "):"tidak ada"}`);
+   if(Array.isArray(d.detail)){
+    d.detail.forEach(item=>{
+      log(`Target ${item.target}: voter ${Array.isArray(item.eligible)?item.eligible.length:0}/10`);
+    });
+   }
+   return;
+  }
   if(d.type==="kickQueue.start"){
-   kickProgress={done:0,total:Number(d.total)||0,running:true};
+   kickProgress={done:0,total:Number(d.total)||0,running:true,terminal:0,success:0,failed:0,queued:0};
    renderKickProgress();
+   return;
+  }
+  if(d.type==="kickQueue.target"){
+   log(`Target ${d.target||"-"}: ${Number(d.eligibleCount)||0} voter eligible [${Array.isArray(d.eligibleAccounts)?d.eligibleAccounts.map(n=>"#"+n).join(", "):"-"}]`);
    return;
   }
   if(d.type==="kick.progress" || d.type==="kickQueue.progress" || d.type==="kickQueue.step"){
@@ -588,7 +612,14 @@ function connectDashboard(){
    return;
   }
   if(d.type==="kick.queued"){
+    kickProgress.queued++;
     log(`#${Number(d.index)+1} KICK QUEUED: ${d.target||"-"} [job ${d.jobId||"-"}]`);
+    return;
+  }
+  if(d.type==="kickQueue.job"){
+    kickProgress.terminal++;
+    if(d.success) kickProgress.success++; else kickProgress.failed++;
+    renderKickProgress();
     return;
   }
   if(d.type==="kick.result"){
@@ -723,7 +754,7 @@ async function runKickQueue(){
   syncAutoKickConfig();
  $('kickAll').disabled=true;
   $('kickAll').textContent='Menjalankan Kick All...';
-  kickProgress={done:0,total:targets.length*10*loopCount,running:true};
+  kickProgress={done:0,total:0,running:true,terminal:0,success:0,failed:0,queued:0};
   renderKickProgress();
    if(!send({action:'kickQueue',room,targets,loopCount,delayMs:Math.max(0,Math.min(60000,Number($('loopDelayMs').value)||0))})){
     $('kickAll').disabled=false;
@@ -732,7 +763,7 @@ async function runKickQueue(){
     renderKickProgress();
     return;
   }
-    log(`Kick All dimulai: ID 1–10 per target, ${targets.length} target × ${loopCount} loop.`);
+    log(`Kick All dimulai: ${targets.length} target × ${loopCount} loop. Backend akan memakai hanya ID yang terkonfirmasi masuk room.`);
 }
 
 $('genUsers').onclick=generateUsers;

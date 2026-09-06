@@ -1,14 +1,12 @@
 {
-  "name": "migmaster-cloudflare-backend",
-  "version": "1.0.0",
+  "name": "migmaster-vercel",
+  "version": "1.0.2",
   "private": true,
-  "description": "MigMaster WebSocket bridge for Cloudflare Workers + Durable Objects",
-  "type": "module",
+  "main": "api/index.js",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy --config ./wrangler.json"
+    "build": "node -e \"console.log('MigMaster Vercel Node build OK')\""
   },
-  "devDependencies": {
-    "wrangler": "^4.68.0"
+  "engines": {
+    "node": ">=18"
   }
 }
