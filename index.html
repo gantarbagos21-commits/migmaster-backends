@@ -146,7 +146,7 @@ pre.log{height:220px;overflow:auto;background:#020617;border-radius:12px;padding
  <div style="height:9px"></div>
   <div class="grid2">
    <div><label>Jumlah pengulangan (loop)</label><input id="kickLoops" type="number" min="1" max="100" value="1" inputmode="numeric"></div>
-   <div><label>Delay sebelum loop (ms)</label><input id="loopDelayMs" type="number" min="0" max="600000" value="0" inputmode="numeric"></div>
+   <div><label>Delay sebelum loop (ms)</label><input id="loopDelayMs" type="number" min="0" max="60000" value="0" inputmode="numeric"></div>
   </div>
  <div class="grid2" style="margin-top:9px">
   <button class="secondary" id="clearTargets">Clear Target</button>
@@ -247,7 +247,7 @@ function renderAutoKickState(state){
    if(status==='countdown'){
     label.textContent=state.source==='manual'
       ? `Timer manual berjalan di ${state.room||$('room').value.trim()||'room'} · menunggu ambang`
-      : `Deteksi vote-kick diterima di ${state.room||$('room').value.trim()||'room'} · menunggu ambang`;
+      : `Auto kick manual diaktifkan untuk ${state.room||$('room').value.trim()||'room'} · menunggu timer`;
  }else if(status==='triggering'){
    label.textContent='Ambang tercapai · Kick All otomatis dijalankan';
  }else if(status==='disabled'){
@@ -255,9 +255,9 @@ function renderAutoKickState(state){
   }else if(status==='stopped'){
     label.textContent='Timer dihentikan manual';
  }else if(status==='armed'){
-   label.textContent='Siap mendeteksi kick di room';
+   label.textContent='Siap menjalankan timer auto kick manual';
  }else{
-   label.textContent='Menunggu deteksi kick di room';
+   label.textContent='Menunggu timer auto kick manual';
  }
 }
 function syncAutoKickConfig(){
@@ -271,7 +271,7 @@ function syncAutoKickConfig(){
    thresholdMs,
    targets:selectedTargets(),
    loopCount,
-   loopDelayMs:Math.max(0,Math.min(600000,Number($('loopDelayMs').value)||0))
+   delayMs:Math.max(0,Math.min(60000,Number($('loopDelayMs').value)||0))
  });
 }
 
@@ -542,10 +542,6 @@ function connectDashboard(){
     return;
   }
   if(d.type==="autoKick.state"){ renderAutoKickState(d); return; }
-  if(d.type==="autoKick.detected"){
-    log(`ID ${Number(d.index)+1} mendeteksi vote-kick untuk ${d.targetUsername||"target tidak dikenal"} di room ${d.room}.`);
-    return;
-  }
   if(d.type==="autoKick.manual.started"){ return; }
   if(d.type==="kickQueue.start"){
    kickProgress={done:0,total:Number(d.total)||0,running:true};
@@ -695,7 +691,7 @@ async function runKickQueue(){
   $('kickAll').textContent='Menjalankan Kick All...';
   kickProgress={done:0,total:targets.length*10*loopCount,running:true};
   renderKickProgress();
-   if(!send({action:'kickQueue',room,targets,loopCount,loopDelayMs:Math.max(0,Math.min(600000,Number($('loopDelayMs').value)||0))})){
+   if(!send({action:'kickQueue',room,targets,loopCount,delayMs:Math.max(0,Math.min(600000,Number($('loopDelayMs').value)||0))})){
     $('kickAll').disabled=false;
      $('kickAll').textContent='Kick All';
     kickProgress.running=false;
