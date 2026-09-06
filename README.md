@@ -1,8 +1,9 @@
 # MigMaster Cloudflare Backend
-
+Cloudflare deployment sync
 Backend WebSocket bridge for the MigReborn Developer API, packaged for Cloudflare Workers + Durable Objects.
 
 ## Deploy from Cloudflare Dashboard
+
 
 1. Create a Cloudflare account and open **Workers & Pages**.
 2. Create a Worker project and connect this GitHub repository, or upload this project through your normal Git workflow.
