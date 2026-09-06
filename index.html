@@ -32,9 +32,16 @@ button:active{transform:scale(.985)}button:disabled{opacity:.55;cursor:not-allow
 .list-head,.selected-head{display:flex;justify-content:space-between;align-items:center;margin-top:12px;margin-bottom:7px;font-weight:850}.list-head span:last-child,.selected-head span:last-child{font-size:12px;color:var(--muted)}
 .target-slots{display:grid;gap:7px;margin-top:9px}.target-row{display:grid;grid-template-columns:40px minmax(0,1fr);gap:8px;align-items:center}.target-number{display:flex;align-items:center;justify-content:center;min-height:48px;border:1px solid #2e415d;border-radius:11px;background:#16243a;font-weight:900}
  .timer{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#08111f;border:1px solid #465b79;border-radius:12px;padding:12px 13px;margin-top:9px}.timer strong{font-size:22px;font-variant-numeric:tabular-nums;white-space:nowrap}.timer.running{border-color:var(--green)}.timer.done{border-color:var(--blue)}.timer.waiting{border-color:#465b79}.check-row{display:flex;align-items:center;gap:9px;color:#cbd5e1;font-size:13px;font-weight:700}.check-row input{width:22px;min-height:22px;accent-color:var(--green)}
-pre.log{height:220px;overflow:auto;background:#020617;border-radius:12px;padding:11px;margin:0;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere}.hidden{display:none!important}.kick-progress{margin-top:10px;background:#08111f;border:1px solid #465b79;border-radius:12px;padding:11px 12px}.kick-progress-head{display:flex;justify-content:space-between;gap:8px;font-size:13px;font-weight:800;margin-bottom:7px}.progress-track{height:12px;background:#16243a;border-radius:999px;overflow:hidden}.progress-fill{height:100%;width:0;background:var(--green);border-radius:999px;transition:width .2s ease}.progress-note{font-size:12px;color:var(--muted);margin-top:6px}.login-list-view{display:flex;flex-direction:column;gap:8px;margin-top:7px}.login-row{display:grid;grid-template-columns:42px minmax(0,1fr) auto auto;gap:10px;align-items:center;background:#0b1728;border:1px solid #31445f;border-radius:12px;padding:9px}.login-row.selected{border-color:var(--green);box-shadow:0 0 0 1px var(--green) inset}.login-num{font-weight:900;color:#cbd5e1;text-align:center}.login-main{min-width:0}.login-user{font-weight:800;color:#f8fafc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.login-meta{font-size:11px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.login-select{width:42px;height:42px;margin:0}.login-balance{min-width:105px;min-height:42px;padding:8px 12px;border-radius:999px;background:#12243a;border:1px solid #365274;color:#f8fafc;font-weight:850;font-variant-numeric:tabular-nums;text-align:center;white-space:nowrap}.login-status{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-width:112px;min-height:42px;padding:8px 12px;border-radius:999px;border:1px solid currentColor;font-size:13px;font-weight:900;white-space:nowrap}.login-status .status-dot{width:17px;height:17px;border-radius:50%;display:inline-block;flex:0 0 17px;box-shadow:0 0 8px currentColor}.login-status.standby{color:#f8fafc;background:#172333;border-color:#64748b}.login-status.standby .status-dot{background:#fff;color:#fff}.login-status.auth{color:#fbbf24;background:#2a210b;border-color:#fbbf24}.login-status.auth .status-dot{background:#fbbf24;color:#fbbf24}.login-status.error{color:#ef4444;background:#2a0e12;border-color:#ef4444}.login-status.error .status-dot{background:#ef4444;color:#ef4444}.login-status.success{color:#22c55e;background:#092419;border-color:#22c55e}.login-status.success .status-dot{background:#22c55e;color:#22c55e}.login-empty{padding:12px;border:1px dashed #465b79;border-radius:12px;color:var(--muted);text-align:center}
-@media(max-width:620px){.wrap{padding:8px}.card{padding:11px;border-radius:15px}.grid2,.grid3,.account-grid{grid-template-columns:1fr}.quick-actions{grid-template-columns:1fr 1fr}.quick-actions .danger{grid-column:auto}button{min-height:54px}.user-row{min-height:58px}.user-name{font-size:17px}}
+pre.log{height:220px;overflow:auto;background:#020617;border-radius:12px;padding:11px;margin:0;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere}.hidden{display:none!important}.kick-progress{margin-top:10px;background:#08111f;border:1px solid #465b79;border-radius:12px;padding:11px 12px}.kick-progress-head{display:flex;justify-content:space-between;gap:8px;font-size:13px;font-weight:800;margin-bottom:7px}.progress-track{height:12px;background:#16243a;border-radius:999px;overflow:hidden}.progress-fill{height:100%;width:0;background:var(--green);border-radius:999px;transition:width .2s ease}.progress-note{font-size:12px;color:var(--muted);margin-top:6px}.login-list-view{display:flex;flex-direction:column;gap:8px;margin-top:7px}.login-row{display:grid;grid-template-columns:42px minmax(0,1fr) auto auto;gap:10px;align-items:center;background:#0b1728;border:1px solid #31445f;border-radius:12px;padding:9px}.login-row.selected{border-color:var(--green);box-shadow:0 0 0 1px var(--green) inset}.login-num{font-weight:900;color:#cbd5e1;text-align:center}.login-main{min-width:0}.login-user{font-weight:800;color:#f8fafc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.login-meta{font-size:11px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.login-select{width:42px;height:42px;margin:0}.login-balance{min-width:82px;min-height:34px;padding:5px 8px;border-radius:999px;background:#12243a;border:1px solid #365274;color:#f8fafc;font-weight:850;font-size:12px;line-height:1.1;font-variant-numeric:tabular-nums;text-align:center;white-space:nowrap}.login-status{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-width:82px;min-height:34px;padding:5px 8px;border-radius:999px;border:1px solid currentColor;font-size:11px;line-height:1.1;font-weight:900;white-space:nowrap}.login-status .status-dot{width:13px;height:13px;border-radius:50%;display:inline-block;flex:0 0 13px;box-shadow:0 0 6px currentColor}.login-status.standby{color:#f8fafc;background:#172333;border-color:#64748b}.login-status.standby .status-dot{background:#fff;color:#fff}.login-status.auth{color:#fbbf24;background:#2a210b;border-color:#fbbf24}.login-status.auth .status-dot{background:#fbbf24;color:#fbbf24}.login-status.error{color:#ef4444;background:#2a0e12;border-color:#ef4444}.login-status.error .status-dot{background:#ef4444;color:#ef4444}.login-status.success{color:#22c55e;background:#092419;border-color:#22c55e}.login-status.success .status-dot{background:#22c55e;color:#22c55e}.login-empty{padding:12px;border:1px dashed #465b79;border-radius:12px;color:var(--muted);text-align:center}
+@media(max-width:620px){.wrap{padding:8px}.card{padding:11px;border-radius:15px}.grid2,.grid3,.account-grid{grid-template-columns:1fr}.quick-actions{grid-template-columns:1fr 1fr}.quick-actions .danger{grid-column:auto}button{min-height:54px}.user-row{min-height:58px}.user-name{font-size:17px}.login-row{grid-template-columns:34px minmax(0,1fr) auto auto;gap:6px;padding:7px}.login-balance{min-width:72px;min-height:30px;padding:4px 6px;font-size:10px}.login-status{min-width:72px;min-height:30px;padding:4px 6px;font-size:10px;gap:4px}.login-status .status-dot{width:11px;height:11px;flex-basis:11px}}
 @media(max-width:380px){.quick-actions{grid-template-columns:1fr}h1{font-size:20px}}
+
+/* Mobile tab navigation */
+.tabbar{position:sticky;top:0;z-index:20;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px;margin:0 0 10px;padding:6px;background:#08111f;border:1px solid #31445f;border-radius:12px}
+.tab-btn{min-height:38px;padding:7px 5px;border:1px solid #31445f;border-radius:9px;background:#0b1728;color:#cbd5e1;font-weight:800;font-size:11px;cursor:pointer}
+.tab-btn.active{background:#16314f;border-color:#38bdf8;color:#fff}
+.tab-panel{display:none}.tab-panel.active{display:block}
+@media(max-width:560px){.wrap{padding:8px}.card{padding:11px}.tabbar{grid-template-columns:repeat(3,1fr);gap:5px}.tab-btn{font-size:10px;min-height:36px}.login-row{grid-template-columns:28px minmax(0,1fr) auto auto;gap:6px;padding:7px}.login-balance,.login-status{min-width:62px;min-height:28px;padding:4px 5px;font-size:9px}.login-status .status-dot{width:9px;height:9px;flex-basis:9px}.quick-actions{grid-template-columns:repeat(2,1fr)!important}.timer strong{font-size:18px}}
 </style>
 </head>
 <body>
@@ -44,6 +51,15 @@ pre.log{height:220px;overflow:auto;background:#020617;border-radius:12px;padding
 </header>
 
 <div class="wrap">
+<div class="tabbar" role="tablist" aria-label="Navigasi MigMaster">
+ <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+ <button class="tab-btn" data-tab="akun">Akun</button>
+ <button class="tab-btn" data-tab="room">Room</button>
+ <button class="tab-btn" data-tab="kick">Kick</button>
+ <button class="tab-btn" data-tab="auto">Auto Kick</button>
+ <button class="tab-btn" data-tab="log">Log</button>
+</div>
+<div class="tab-panel active" data-panel="dashboard">
 <div class="card">
  <div class="section-title"><h2>Backend WebSocket</h2><span class="badge">Vercel + Backend</span></div>
  <div><label for="backendWsUrl">URL WebSocket backend</label><input id="backendWsUrl" placeholder="wss://nama-backend-anda.example/ws" autocomplete="off" spellcheck="false"></div>
@@ -60,6 +76,8 @@ pre.log{height:220px;overflow:auto;background:#020617;border-radius:12px;padding
  <button class="danger" id="disconnectAll">Logout</button>
 </div>
 
+</div>
+<div class="tab-panel" data-panel="akun">
 <div class="card">
  <div class="section-title"><h2><span class="step">1</span>Siapkan 10 Akun</h2><span class="badge">10 Troop</span></div>
  <div class="grid2">
@@ -100,6 +118,8 @@ pre.log{height:220px;overflow:auto;background:#020617;border-radius:12px;padding
  <div class="accounts" id="accounts"></div>
 </div>
 
+</div>
+<div class="tab-panel" data-panel="room">
 <div class="card">
  <div class="section-title"><h2><span class="step">3</span>Masuk Room</h2><span class="badge">1 room</span></div>
  <div class="grid2">
@@ -112,6 +132,8 @@ pre.log{height:220px;overflow:auto;background:#020617;border-radius:12px;padding
   </div>
 </div>
 
+</div>
+<div class="tab-panel" data-panel="kick">
 <div class="card">
  <div class="section-title"><h2><span class="step">4</span>Pilih Target</h2><span class="badge">maks. 10</span></div>
  <button class="blue" id="participants">List User Room</button>
@@ -137,11 +159,13 @@ pre.log{height:220px;overflow:auto;background:#020617;border-radius:12px;padding
  </div>
 </div>
 
+</div>
+<div class="tab-panel" data-panel="auto">
  <div class="card">
   <div class="section-title"><h2><span class="step">5</span>Auto Detect Vote-Kick</h2><span class="badge">APK logic</span></div>
   <div class="grid2">
    <div><label for="autoKickThresholdMs">Eksekusi auto kick saat sisa timer (ms)</label><input id="autoKickThresholdMs" type="number" min="0" max="60000" value="30000" inputmode="numeric"></div>
-    <div><label>Countdown maksimal (ms)</label><div class="statusbox"><div class="balance">60000 ms</div><div class="small">Dimulai saat ID mendeteksi kick</div></div></div>
+
   </div>
   <div id="autoKickTimer" class="timer waiting"><span>Menunggu deteksi kick di room</span><strong>60000 ms</strong></div>
   <div style="margin-top:9px">
@@ -154,6 +178,8 @@ pre.log{height:220px;overflow:auto;background:#020617;border-radius:12px;padding
   </div>
  </div>
 
+</div>
+<div class="tab-panel" data-panel="log">
 <div class="card">
 
    <div class="section-title"><h2>Log Sistem</h2><button class="secondary" style="width:auto;min-height:40px" id="clearLog">Clear</button></div>
@@ -260,6 +286,18 @@ function log(s){
  if(lines.length>MAX_ACTIVITY_LOG_LINES)lines.splice(0,lines.length-MAX_ACTIVITY_LOG_LINES);
  e.textContent=lines.join("\n")+"\n";
  e.scrollTop=e.scrollHeight
+}
+
+// Tab navigation: keeps each workflow separate and mobile-friendly.
+function initTabs(){
+ const buttons=[...document.querySelectorAll('.tab-btn')];
+ const panels=[...document.querySelectorAll('.tab-panel')];
+ buttons.forEach(btn=>btn.addEventListener('click',()=>{
+   const tab=btn.dataset.tab;
+   buttons.forEach(b=>b.classList.toggle('active',b===btn));
+   panels.forEach(p=>p.classList.toggle('active',p.dataset.panel===tab));
+   window.scrollTo({top:0,behavior:'smooth'});
+ }));
 }
 function setStatus(i,text,cls="offline"){
  const e=$("s"+i); if(e){e.textContent=text;e.className="status "+cls}
@@ -686,7 +724,7 @@ $('resetAutoKickTimer').onclick=()=>{
  renderAutoKickState({status:$('autoKickEnabled').checked?'armed':'disabled',remainingMs:60000});
 };
 $("clearLog").onclick=()=>{$("log").textContent=""};
-render();syncCredentialBox();refreshProfileList();renderKickProgress();renderAutoKickState({status:'armed',remainingMs:60000});
+initTabs();render();syncCredentialBox();refreshProfileList();renderKickProgress();renderAutoKickState({status:'armed',remainingMs:60000});
 function initBackendConfig(){
  const input=$("backendWsUrl");
  if(!input) return;
