@@ -146,7 +146,8 @@ pre.log{height:220px;overflow:auto;background:#020617;border-radius:12px;padding
  <div style="height:9px"></div>
   <div class="grid2">
    <div><label>Jumlah pengulangan (loop)</label><input id="kickLoops" type="number" min="1" max="100" value="1" inputmode="numeric"></div>
-   <div><label>Delay sebelum loop (ms)</label><input id="loopDelayMs" type="number" min="0" max="60000" value="0" inputmode="numeric"></div>
+   <div><label>Delay antar vote (ms) — 0 = tercepat</label><input id="kickVoteDelayMs" type="number" min="0" max="60000" value="0" inputmode="numeric"></div>
+   <div><label>Delay sebelum loop (ms)</label><input id="loopDelayMs" type="number" min="0" max="600000" value="0" inputmode="numeric"></div>
   </div>
  <div class="grid2" style="margin-top:9px">
   <button class="secondary" id="clearTargets">Clear Target</button>
@@ -189,7 +190,7 @@ pre.log{height:220px;overflow:auto;background:#020617;border-radius:12px;padding
 
 <script>
 const $=id=>document.getElementById(id);
-const accounts=Array.from({length:10},()=>({username:"",password:"",status:"offline",balance:"-",joinedRooms:[],requestedRooms:[]}));
+const accounts=Array.from({length:10},()=>({username:"",password:"",status:"offline",balance:"-"}));
 let ui=null;
 let backendRetryTimer=null, backendRetryDelay=1000, backendConnected=false;
 let participantUsers=[];
@@ -214,18 +215,8 @@ function startAutoKickTicker(){
 function stopAutoKickTicker(){
  if(autoKickTimerTicker){clearInterval(autoKickTimerTicker);autoKickTimerTicker=null;}
 }
-let kickProgress={done:0,total:0,running:false,terminal:0,success:0,failed:0,queued:0};
-function renderKickProgress(){
- const pct=kickProgress.total?Math.min(100,Math.round(kickProgress.done/kickProgress.total*100)):0;
- $("kickProgressFill").style.width=pct+"%";
- $("kickProgressText").textContent=pct+"%";
- $("kickProgressLabel").textContent=kickProgress.running?"Kick All sedang berjalan":"Progres Kick All";
- $("kickProgressNote").textContent=kickProgress.running
-   ? `${kickProgress.done}/${kickProgress.total} vote dikirim · hasil final ${kickProgress.terminal} (sukses ${kickProgress.success}, gagal ${kickProgress.failed})`
-   : kickProgress.total
-     ? `Dispatch selesai: ${kickProgress.done}/${kickProgress.total} · hasil final ${kickProgress.terminal} (sukses ${kickProgress.success}, gagal ${kickProgress.failed}).`
-     : "Belum ada proses kick.";
-}
+let kickProgress={done:0,total:0,running:false};
+function renderKickProgress(){const pct=kickProgress.total?Math.min(100,Math.round(kickProgress.done/kickProgress.total*100)):0;$("kickProgressFill").style.width=pct+"%";$("kickProgressText").textContent=pct+"%";$("kickProgressLabel").textContent=kickProgress.running?"Kick All sedang berjalan":"Progres Kick All";$("kickProgressNote").textContent=kickProgress.running?`${kickProgress.done}/${kickProgress.total} target diproses...`:kickProgress.total?`Selesai: ${kickProgress.done}/${kickProgress.total} target.`:"Belum ada proses kick.";}
 
 function formatMs(value){
  const ms=Math.max(0,Math.floor(Number(value)||0));
@@ -257,7 +248,7 @@ function renderAutoKickState(state){
    if(status==='countdown'){
     label.textContent=state.source==='manual'
       ? `Timer manual berjalan di ${state.room||$('room').value.trim()||'room'} · menunggu ambang`
-      : `Auto kick manual diaktifkan untuk ${state.room||$('room').value.trim()||'room'} · menunggu timer`;
+      : `Deteksi vote-kick diterima di ${state.room||$('room').value.trim()||'room'} · menunggu ambang`;
  }else if(status==='triggering'){
    label.textContent='Ambang tercapai · Kick All otomatis dijalankan';
  }else if(status==='disabled'){
@@ -265,9 +256,9 @@ function renderAutoKickState(state){
   }else if(status==='stopped'){
     label.textContent='Timer dihentikan manual';
  }else if(status==='armed'){
-   label.textContent='Siap menjalankan timer auto kick manual';
+   label.textContent='Siap mendeteksi kick di room';
  }else{
-   label.textContent='Menunggu timer auto kick manual';
+   label.textContent='Menunggu deteksi kick di room';
  }
 }
 function syncAutoKickConfig(){
@@ -281,7 +272,9 @@ function syncAutoKickConfig(){
    thresholdMs,
    targets:selectedTargets(),
    loopCount,
-   delayMs:Math.max(0,Math.min(60000,Number($('loopDelayMs').value)||0))
+   loopDelayMs:Math.max(0,Math.min(600000,Number($('loopDelayMs').value)||0)),
+   socketDelayMs:Math.max(0,Math.min(60000,Number($('kickVoteDelayMs').value)||0)),
+   sequentialMode:false
  });
 }
 
@@ -509,21 +502,11 @@ function connectDashboard(){
  ui.onopen=()=>{
    backendConnected=true; backendRetryDelay=1000;
    log("Dashboard ↔ backend OPEN");
-   // Re-request authoritative backend state after every dashboard reconnect.
-   // This never logs an account in again.
-   send({action:"dashboard.sync"});
-   syncAutoKickConfig();
+    syncAutoKickConfig();
  };
  ui.onmessage=e=>{
   let d;try{d=JSON.parse(e.data)}catch{return}
-  if(d.type==="dashboard.ready"){
-   const version=d.backendVersion||"versão não informada";
-   log(`Backend ativo: ${version}`);
-   if(!d.backendVersion){
-     log("PERINGATAN: backend yang terhubung tidak mengirim versi. Pastikan server.js versi terbaru sudah dideploy.");
-   }
-   return;
-  }
+  if(d.type==="dashboard.ready"){ log(`Backend ativo: ${d.backendVersion||"versão não informada"}`); return; }
   // The backend forwards the real API frame before its derived dashboard status.
   // session.ready is the authoritative login-success event, so reflect it directly
   // in the UI. This is protocol-based, not a guessed success heuristic.
@@ -549,29 +532,9 @@ function connectDashboard(){
    const status=(current==="online" && !["error","offline","online"].includes(incoming))?"online":incoming;
    const cls=status==="online"?"online":status==="error"?"error":status==="offline"?"offline":"wait";
    accounts[d.index].status=status;
-   if(d.username!=null) accounts[d.index].username=String(d.username||"");
    if(d.balance){accounts[d.index].balance=d.balance;$(`b${d.index}`).textContent=d.balance}
-   // Keep the dashboard's local room view aligned with the backend snapshot.
-   // Room membership itself remains authoritative on the backend account socket.
-   if(Array.isArray(d.joinedRooms)) accounts[d.index].joinedRooms=[...new Set(d.joinedRooms.map(v=>String(v||"").trim()).filter(Boolean))];
-   if(Array.isArray(d.requestedRooms)) accounts[d.index].requestedRooms=[...new Set(d.requestedRooms.map(v=>String(v||"").trim()).filter(Boolean))];
    setStatus(d.index,status+(d.message?": "+d.message:""),cls);
    render();
-   return;
-  }
-  if(d.type==="account.snapshot"){
-   const idx=Number(d.index);
-   if(Number.isInteger(idx) && accounts[idx]){
-     if(d.username!=null) accounts[idx].username=String(d.username||"");
-     accounts[idx].status=d.ready&&d.socketOpen?"online":(d.socketOpen?"connecting":"offline");
-     accounts[idx].joinedRooms=Array.isArray(d.joinedRooms)?[...new Set(d.joinedRooms.map(v=>String(v||"").trim()).filter(Boolean))]:[];
-     accounts[idx].requestedRooms=Array.isArray(d.requestedRooms)?[...new Set(d.requestedRooms.map(v=>String(v||"").trim()).filter(Boolean))]:[];
-     render();
-   }
-   return;
-  }
-  if(d.type==="dashboard.sync.done"){
-   log(`State backend disinkronkan: ${Number(d.connectedAccounts)||0}/10 akun ONLINE, ${Number(d.joinedAccountCount)||0} akun punya membership room tercatat.`);
    return;
   }
   if(d.type==="balance"){accounts[d.index].balance=d.balance;$(`b${d.index}`).textContent=d.balance;render();return}
@@ -582,24 +545,14 @@ function connectDashboard(){
     return;
   }
   if(d.type==="autoKick.state"){ renderAutoKickState(d); return; }
+  if(d.type==="autoKick.detected"){
+    log(`ID ${Number(d.index)+1} mendeteksi vote-kick untuk ${d.targetUsername||"target tidak dikenal"} di room ${d.room}.`);
+    return;
+  }
   if(d.type==="autoKick.manual.started"){ return; }
-  if(d.type==="kickQueue.preflight"){
-   const voters=Array.isArray(d.voters)?d.voters:[];
-   log(`Kick All preflight: ${voters.length} ID memenuhi syarat sebagai voter di room ${d.room||"-"}: ${voters.length?voters.map(n=>"#"+n).join(", "):"tidak ada"}`);
-   if(Array.isArray(d.detail)){
-    d.detail.forEach(item=>{
-      log(`Target ${item.target}: voter ${Array.isArray(item.eligible)?item.eligible.length:0}/10`);
-    });
-   }
-   return;
-  }
   if(d.type==="kickQueue.start"){
-   kickProgress={done:0,total:Number(d.total)||0,running:true,terminal:0,success:0,failed:0,queued:0};
+   kickProgress={done:0,total:Number(d.total)||0,running:true};
    renderKickProgress();
-   return;
-  }
-  if(d.type==="kickQueue.target"){
-   log(`Target ${d.target||"-"}: ${Number(d.eligibleCount)||0} voter eligible [${Array.isArray(d.eligibleAccounts)?d.eligibleAccounts.map(n=>"#"+n).join(", "):"-"}]`);
    return;
   }
   if(d.type==="kick.progress" || d.type==="kickQueue.progress" || d.type==="kickQueue.step"){
@@ -610,22 +563,6 @@ function connectDashboard(){
    kickProgress.running=kickProgress.total>0 && kickProgress.done<kickProgress.total;
    renderKickProgress();
    return;
-  }
-  if(d.type==="kick.queued"){
-    kickProgress.queued++;
-    log(`#${Number(d.index)+1} KICK QUEUED: ${d.target||"-"} [job ${d.jobId||"-"}]`);
-    return;
-  }
-  if(d.type==="kickQueue.job"){
-    kickProgress.terminal++;
-    if(d.success) kickProgress.success++; else kickProgress.failed++;
-    renderKickProgress();
-    return;
-  }
-  if(d.type==="kick.result"){
-    const label=d.success?"SUKSES":"GAGAL";
-    log(`#${Number(d.index)+1} KICK ${label}: ${d.target||"-"} (${d.status||"-"})${d.error?" — "+d.error:""}`);
-    return;
   }
   if(d.type==="kickQueue.error"){kickProgress.done=Number(d.done??kickProgress.done);kickProgress.total=Number(d.total??kickProgress.total);kickProgress.running=false;renderKickProgress();log(`Kick All ERROR: ${d.message||"error tidak diketahui"}`);$("kickAll").disabled=false;$("kickAll").textContent="Kick All";return;}
   if(d.type==="kick.done" || d.type==="kickQueue.done"){kickProgress.done=Math.min(Number(d.total??kickProgress.total),Number(d.done??d.total??kickProgress.total));kickProgress.total=Number(d.total??kickProgress.total);kickProgress.running=false;renderKickProgress();$("kickAll").disabled=false;$("kickAll").textContent="Kick All";return;}
@@ -754,16 +691,18 @@ async function runKickQueue(){
   syncAutoKickConfig();
  $('kickAll').disabled=true;
   $('kickAll').textContent='Menjalankan Kick All...';
-  kickProgress={done:0,total:0,running:true,terminal:0,success:0,failed:0,queued:0};
+  kickProgress={done:0,total:targets.length*10*loopCount,running:true};
   renderKickProgress();
-   if(!send({action:'kickQueue',room,targets,loopCount,delayMs:Math.max(0,Math.min(60000,Number($('loopDelayMs').value)||0))})){
+   const voteDelayMs=Math.max(0,Math.min(60000,Number($('kickVoteDelayMs').value)||0));
+   const loopDelayMs=Math.max(0,Math.min(600000,Number($('loopDelayMs').value)||0));
+   if(!send({action:'kickQueue',room,targets,loopCount,loopDelayMs,voteDelayMs,socketDelayMs:voteDelayMs,delayMs:voteDelayMs,sequentialMode:false})){
     $('kickAll').disabled=false;
      $('kickAll').textContent='Kick All';
     kickProgress.running=false;
     renderKickProgress();
     return;
   }
-    log(`Kick All dimulai: ${targets.length} target × ${loopCount} loop. Backend memproses satu voter pada satu waktu, lalu pindah ke target berikutnya setelah semua voter target selesai.`);
+    log(`Kick All dimulai: ${targets.length} target × ${loopCount} loop, delay antar vote ${voteDelayMs} ms.`);
 }
 
 $('genUsers').onclick=generateUsers;
@@ -807,6 +746,7 @@ $('participants').onclick=()=>{ const room=$('room').value.trim(); if(!room)retu
 $('clearTargets').onclick=clearTargets;
 
 $('kickLoops').oninput=syncAutoKickConfig;
+$('kickVoteDelayMs').oninput=syncAutoKickConfig;
 $('loopDelayMs').oninput=syncAutoKickConfig;
 $('kickAll').onclick=runKickQueue;
 $('room').oninput=syncAutoKickConfig;
